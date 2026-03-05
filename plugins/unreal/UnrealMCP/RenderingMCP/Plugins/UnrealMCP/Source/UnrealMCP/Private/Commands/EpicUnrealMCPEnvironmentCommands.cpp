@@ -219,6 +219,49 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleCommand(const F
     return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown environment command: %s"), *CommandType));
 }
 
+// Viewport screenshot
+TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleGetViewportScreenshot(const TSharedPtr<FJsonObject>& Params)
+{
+    if (CommandType == TEXT("get_viewport_screenshot"))
+    {
+        return HandleGetViewportScreenshot(Params);
+    }
+    else if (CommandType == TEXT("create_light"))
+    {
+        return HandleCreateLight(Params);
+    }
+    else if (CommandType == TEXT("set_light_properties"))
+    {
+        return HandleSetLightProperties(Params);
+    }
+    else if (CommandType == TEXT("get_lights"))
+    {
+        return HandleGetLights(Params);
+    }
+    else if (CommandType == TEXT("delete_light"))
+    {
+        return HandleDeleteLight(Params);
+    }
+    else if (CommandType == TEXT("create_post_process_volume"))
+    {
+        return HandleCreatePostProcessVolume(Params);
+    }
+    else if (CommandType == TEXT("set_post_process_settings"))
+    {
+        return HandleSetPostProcessSettings(Params);
+    }
+    else if (CommandType == TEXT("spawn_basic_actor"))
+    {
+        return HandleSpawnBasicActor(Params);
+    }
+    else if (CommandType == TEXT("set_actor_material"))
+    {
+        return HandleSetActorMaterial(Params);
+    }
+    
+    return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown environment command: %s"), *CommandType));
+}
+
 // Light management - TODO: Migrate from main file
 TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleCreateLight(const TSharedPtr<FJsonObject>& Params)
 {
@@ -308,8 +351,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleCreatePostProce
     Settings.AutoExposureMethod = AEM_Manual;
     Settings.bOverride_AutoExposureBias = true;
     Settings.AutoExposureBias = 0.0f;
-    Settings.bOverride_CameraExposureValue = true;
-    Settings.CameraExposureValue = 0.0f;
+    // Note: CameraExposureValue is not available in UE 5.7, use AutoExposureBias instead
 
     // Disable effects that interfere with accurate metering
     Settings.bOverride_BloomIntensity = true;
@@ -426,10 +468,11 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleSetPostProcessS
 
     if (Params->HasField(TEXT("exposure_value")))
     {
+        // In UE 5.7, CameraExposureValue is not available, map to AutoExposureBias
         double EV = 0.0;
         Params->TryGetNumberField(TEXT("exposure_value"), EV);
-        Settings.bOverride_CameraExposureValue = true;
-        Settings.CameraExposureValue = (float)EV;
+        Settings.bOverride_AutoExposureBias = true;
+        Settings.AutoExposureBias = (float)EV;
     }
 
     // Effect toggles
@@ -479,7 +522,8 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleSetPostProcessS
     ResultObj->SetBoolField(TEXT("success"), true);
     ResultObj->SetStringField(TEXT("name"), TargetVolume->GetName());
     ResultObj->SetNumberField(TEXT("exposure_bias"), Settings.AutoExposureBias);
-    ResultObj->SetNumberField(TEXT("exposure_value"), Settings.CameraExposureValue);
+    // CameraExposureValue not available in UE 5.7, use AutoExposureBias instead
+    ResultObj->SetNumberField(TEXT("exposure_value"), Settings.AutoExposureBias);
     ResultObj->SetNumberField(TEXT("bloom_intensity"), Settings.BloomIntensity);
     ResultObj->SetNumberField(TEXT("vignette_intensity"), Settings.VignetteIntensity);
     ResultObj->SetBoolField(TEXT("unbound"), TargetVolume->bUnbound);

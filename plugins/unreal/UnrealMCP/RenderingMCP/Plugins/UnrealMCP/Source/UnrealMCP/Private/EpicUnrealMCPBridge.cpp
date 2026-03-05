@@ -54,7 +54,6 @@
 #include "Commands/EpicUnrealMCPEditorCommands.h"
 #include "Commands/EpicUnrealMCPBlueprintCommands.h"
 #include "Commands/EpicUnrealMCPBlueprintGraphCommands.h"
-#include "Commands/EpicUnrealMCPEnvironmentCommands.h"
 #include "Commands/EpicUnrealMCPCommonUtils.h"
 
 // Default settings
@@ -67,7 +66,6 @@ UEpicUnrealMCPBridge::UEpicUnrealMCPBridge()
     BlueprintCommands = MakeShared<FEpicUnrealMCPBlueprintCommands>();
     BlueprintGraphCommands = MakeShared<FEpicUnrealMCPBlueprintGraphCommands>();
     NiagaraCommands = MakeShared<FEpicUnrealMCPNiagaraCommands>();
-    EnvironmentCommands = MakeShared<FEpicUnrealMCPEnvironmentCommands>();
 }
 
 UEpicUnrealMCPBridge::~UEpicUnrealMCPBridge()
@@ -76,7 +74,6 @@ UEpicUnrealMCPBridge::~UEpicUnrealMCPBridge()
     BlueprintCommands.Reset();
     BlueprintGraphCommands.Reset();
     NiagaraCommands.Reset();
-    EnvironmentCommands.Reset();
 }
 
 // Initialize subsystem
@@ -279,7 +276,7 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
                      CommandType == TEXT("spawn_basic_actor") ||
                      CommandType == TEXT("set_actor_material"))
             {
-                ResultJson = EnvironmentCommands->HandleCommand(CommandType, Params);
+                ResultJson = FEpicUnrealMCPEnvironmentCommands::HandleCommand(CommandType, Params);
             }
             // Blueprint Graph Commands
             else if (CommandType == TEXT("add_blueprint_node") ||
