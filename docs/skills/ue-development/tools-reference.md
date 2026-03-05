@@ -517,6 +517,140 @@ delete_light(name="PointLight_0")
 
 ---
 
+## 🎨 Post Process Tools
+
+Tools for setting up lookdev environment with proper exposure control.
+
+### create_post_process_volume
+Create a Post Process Volume for lookdev environment setup.
+
+**Parameters:**
+- `name` (string): Name for the volume (default: "PostProcessVolume_Lookdev")
+- `location` (object): World position `{"x": 0, "y": 0, "z": 0}` (default: origin)
+- `scale` (object): Volume scale `{"x": 1000, "y": 1000, "z": 1000}` (default: large unbound)
+
+**Default Lookdev Settings:**
+- Manual exposure mode
+- EV100 = 0 (exposure_bias = 0, exposure_value = 0)
+- Bloom: disabled
+- Vignette: disabled
+- Ambient Occlusion: disabled
+- Unbound: true (affects entire scene)
+
+**Example:**
+```bash
+# Create default lookdev PP volume
+create_post_process_volume()
+
+# Create with custom name and location
+create_post_process_volume(
+    name="MyLookdev_PP",
+    location={"x": 0, "y": 0, "z": 100},
+    scale={"x": 500, "y": 500, "z": 500}
+)
+```
+
+### set_post_process_settings
+Set Post Process Volume settings for lookdev environment.
+
+**Parameters:**
+- `name` (string): Name of the volume (optional, uses first available if not set)
+- `exposure_mode` (string): "manual" or "auto" (default: manual for lookdev)
+- `exposure_bias` (float): Exposure bias value (default: 0 for EV100=0)
+- `exposure_value` (float): Camera exposure value (default: 0 for EV100=0)
+- `bloom_enabled` (bool): Enable/disable bloom (default: False for lookdev)
+- `vignette_enabled` (bool): Enable/disable vignette (default: False)
+- `ao_enabled` (bool): Enable/disable ambient occlusion (default: False)
+- `unbound` (bool): Whether volume affects entire scene (default: True)
+- `enabled` (bool): Whether volume is active (default: True)
+
+**Example:**
+```bash
+# Set manual exposure for lookdev
+set_post_process_settings(
+    name="Lookdev_PP",
+    exposure_mode="manual",
+    exposure_value=0,
+    bloom_enabled=False,
+    vignette_enabled=False
+)
+
+# Adjust exposure for different lighting conditions
+set_post_process_settings(exposure_bias=0.5)
+```
+
+---
+
+## 📦 Actor Spawning Tools
+
+Tools for spawning basic actors for lookdev material testing.
+
+### spawn_basic_actor
+Spawn a basic actor in the scene for lookdev purposes.
+
+**Parameters:**
+- `actor_type` (string, **required**): "Sphere", "Cube", "Plane", "Cylinder", or "StaticMeshActor"
+- `name` (string): Name for the actor (auto-generated if not provided)
+- `location` (object): World position `{"x": 0, "y": 0, "z": 0}` (default: origin)
+- `rotation` (object): Rotation in degrees `{"pitch": 0, "yaw": 0, "roll": 0}` (default: zero)
+- `scale` (object): Scale factors `{"x": 1, "y": 1, "z": 1}` (default: unit scale)
+- `mesh_path` (string): Static mesh asset path (for "StaticMeshActor" type)
+
+**Pre-built Shapes:**
+- `Sphere` - Material ball for shader testing
+- `Cube` - Box primitive
+- `Plane` - Gray card / ground plane
+- `Cylinder` - Cylindrical primitive
+
+**Example:**
+```bash
+# Spawn a material ball (sphere)
+spawn_basic_actor(
+    actor_type="Sphere",
+    name="MaterialBall",
+    location={"x": 0, "y": 0, "z": 100}
+)
+
+# Spawn a gray card (plane)
+spawn_basic_actor(
+    actor_type="Plane",
+    name="GrayCard",
+    location={"x": 200, "y": 0, "z": 0},
+    scale={"x": 2, "y": 2, "z": 1}
+)
+
+# Spawn custom mesh
+spawn_basic_actor(
+    actor_type="StaticMeshActor",
+    name="CustomMesh",
+    mesh_path="/Game/Meshes/MyMesh.MyMesh"
+)
+```
+
+### set_actor_material
+Apply a material to an actor's mesh component.
+
+**Parameters:**
+- `actor_name` (string, **required**): Name of the target actor
+- `material_path` (string, **required**): Path to the material asset
+
+**Example:**
+```bash
+# Apply material to material ball
+set_actor_material(
+    actor_name="MaterialBall",
+    material_path="/Game/Materials/M_Lookdev_Gray"
+)
+
+# Apply to gray card
+set_actor_material(
+    actor_name="GrayCard",
+    material_path="/Game/Materials/M_GrayCard_018"
+)
+```
+
+---
+
 ## 💡 Usage Tips
 
 ### Performance Optimization

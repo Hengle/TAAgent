@@ -66,6 +66,14 @@ This skill provides comprehensive guides for UE development workflows, including
 - `get_lights` - List all lights in level
 - `delete_light` - Remove lights
 
+### Post Process
+- `create_post_process_volume` - Create PP volume for lookdev
+- `set_post_process_settings` - Configure exposure, bloom, vignette, AO
+
+### Actor Spawning
+- `spawn_basic_actor` - Spawn Sphere/Cube/Plane/Cylinder for testing
+- `set_actor_material` - Apply material to actor
+
 ### Viewport
 - `get_viewport_screenshot` - Capture viewport to image file
 

@@ -160,6 +160,77 @@ set_light_properties(
 delete_light(name="KeyLight_Low")
 ```
 
+### 完整的 Lookdev 环境搭建流程
+
+```python
+# 1. 创建 Post Process Volume（关键！设置曝光基准）
+create_post_process_volume(
+    name="Lookdev_PP",
+    location={"x": 0, "y": 0, "z": 0},
+    scale={"x": 2000, "y": 2000, "z": 2000}
+)
+
+# 2. 确认曝光设置（EV100=0）
+set_post_process_settings(
+    name="Lookdev_PP",
+    exposure_mode="manual",
+    exposure_value=0,
+    bloom_enabled=False,
+    vignette_enabled=False,
+    ao_enabled=False,
+    unbound=True
+)
+
+# 3. 创建材质球（Sphere）
+spawn_basic_actor(
+    actor_type="Sphere",
+    name="MaterialBall",
+    location={"x": 0, "y": 0, "z": 100},
+    scale={"x": 1, "y": 1, "z": 1}
+)
+
+# 4. 创建灰板（Plane）
+spawn_basic_actor(
+    actor_type="Plane",
+    name="GrayCard",
+    location={"x": 200, "y": 0, "z": 0},
+    rotation={"pitch": 0, "yaw": 0, "roll": 0},
+    scale={"x": 2, "y": 2, "z": 1}
+)
+
+# 5. 创建灰板材质（Linear 0.18）
+create_material(name="M_GrayCard_018")
+set_material_properties(
+    material_name="M_GrayCard_018",
+    shading_model="DefaultLit"
+)
+# 注：需要通过 add_material_expression 和 connect_material_nodes 设置 BaseColor=0.18
+
+# 6. 应用材质
+set_actor_material(
+    actor_name="GrayCard",
+    material_path="/Game/Materials/M_GrayCard_018"
+)
+
+# 7. 创建主光源（Directional Light）
+create_light(
+    light_type="directional",
+    name="KeyLight",
+    intensity=10.0,
+    color=[1.0, 1.0, 1.0],
+    rotation={"pitch": -45, "yaw": 30, "roll": 0},
+    cast_shadows=True
+)
+
+# 8. 捕获截图用于验证
+get_viewport_screenshot(
+    output_path="C:/Lookdev/verification.png",
+    format="png"
+)
+
+# 9. 使用 Pixel Inspector 检查灰板亮度应为 0.18（Final Color）
+```
+
 ### 获取视口截图验证
 
 ```python

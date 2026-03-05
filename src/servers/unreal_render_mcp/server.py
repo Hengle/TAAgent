@@ -1231,6 +1231,216 @@ def delete_light(name: str) -> Dict[str, Any]:
 
 
 # ============================================================================
+# Post Process Tools (2 tools)
+# ============================================================================
+
+@mcp.tool()
+def create_post_process_volume(
+    name: str = "PostProcessVolume_Lookdev",
+    location: Dict[str, float] = None,
+    scale: Dict[str, float] = None
+) -> Dict[str, Any]:
+    """
+    Create a Post Process Volume for lookdev environment setup.
+    
+    Creates a volume with default Lookdev settings:
+    - Manual exposure mode (EV100=0)
+    - Bloom disabled
+    - Vignette disabled
+    - Ambient Occlusion disabled
+    
+    Args:
+        name: Name for the volume (default: "PostProcessVolume_Lookdev")
+        location: World position {"x": 0, "y": 0, "z": 0} (default: origin)
+        scale: Volume scale {"x": 1000, "y": 1000, "z": 1000} (default: large unbound)
+    
+    Returns:
+        Dictionary with success status, volume name, location, and scale
+    
+    Example:
+        create_post_process_volume(name="Lookdev_PP", location={"x": 0, "y": 0, "z": 0})
+    """
+    unreal = get_unreal_connection()
+    try:
+        params = {"name": name}
+        if location:
+            params["location"] = location
+        if scale:
+            params["scale"] = scale
+        response = unreal.send_command("create_post_process_volume", params)
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"create_post_process_volume error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@mcp.tool()
+def set_post_process_settings(
+    name: str = None,
+    exposure_mode: str = None,
+    exposure_bias: float = None,
+    exposure_value: float = None,
+    bloom_enabled: bool = None,
+    vignette_enabled: bool = None,
+    ao_enabled: bool = None,
+    unbound: bool = None,
+    enabled: bool = None
+) -> Dict[str, Any]:
+    """
+    Set Post Process Volume settings for lookdev environment.
+    
+    Args:
+        name: Name of the volume (if None, uses first available)
+        exposure_mode: "manual" or "auto" (default: manual for lookdev)
+        exposure_bias: Exposure bias value (default: 0 for EV100=0)
+        exposure_value: Camera exposure value (default: 0 for EV100=0)
+        bloom_enabled: Enable/disable bloom (default: False for lookdev)
+        vignette_enabled: Enable/disable vignette (default: False for lookdev)
+        ao_enabled: Enable/disable ambient occlusion (default: False for lookdev)
+        unbound: Whether volume affects entire scene (default: True)
+        enabled: Whether volume is active (default: True)
+    
+    Returns:
+        Dictionary with success status and applied settings
+    
+    Example:
+        # Set manual exposure for lookdev
+        set_post_process_settings(
+            name="Lookdev_PP",
+            exposure_mode="manual",
+            exposure_value=0,
+            bloom_enabled=False,
+            vignette_enabled=False
+        )
+    """
+    unreal = get_unreal_connection()
+    try:
+        params = {}
+        if name:
+            params["name"] = name
+        if exposure_mode:
+            params["exposure_mode"] = exposure_mode
+        if exposure_bias is not None:
+            params["exposure_bias"] = exposure_bias
+        if exposure_value is not None:
+            params["exposure_value"] = exposure_value
+        if bloom_enabled is not None:
+            params["bloom_enabled"] = bloom_enabled
+        if vignette_enabled is not None:
+            params["vignette_enabled"] = vignette_enabled
+        if ao_enabled is not None:
+            params["ao_enabled"] = ao_enabled
+        if unbound is not None:
+            params["unbound"] = unbound
+        if enabled is not None:
+            params["enabled"] = enabled
+        response = unreal.send_command("set_post_process_settings", params)
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"set_post_process_settings error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+# ============================================================================
+# Actor Spawning Tools (2 tools)
+# ============================================================================
+
+@mcp.tool()
+def spawn_basic_actor(
+    actor_type: str,
+    name: str = None,
+    location: Dict[str, float] = None,
+    rotation: Dict[str, float] = None,
+    scale: Dict[str, float] = None,
+    mesh_path: str = None
+) -> Dict[str, Any]:
+    """
+    Spawn a basic actor in the scene for lookdev purposes.
+    
+    Args:
+        actor_type: Type of actor - "Sphere", "Cube", "Plane", "Cylinder", or "StaticMeshActor"
+        name: Name for the actor (auto-generated if not provided)
+        location: World position {"x": 0, "y": 0, "z": 0} (default: origin)
+        rotation: Rotation in degrees {"pitch": 0, "yaw": 0, "roll": 0} (default: zero)
+        scale: Scale factors {"x": 1, "y": 1, "z": 1} (default: unit scale)
+        mesh_path: Static mesh asset path (for StaticMeshActor type)
+    
+    Returns:
+        Dictionary with success status, actor name, type, and transform
+    
+    Example:
+        # Spawn a material ball (sphere)
+        spawn_basic_actor(
+            actor_type="Sphere",
+            name="MaterialBall",
+            location={"x": 0, "y": 0, "z": 100},
+            scale={"x": 1, "y": 1, "z": 1}
+        )
+        
+        # Spawn a gray card (plane)
+        spawn_basic_actor(
+            actor_type="Plane",
+            name="GrayCard",
+            location={"x": 200, "y": 0, "z": 0},
+            rotation={"pitch": 0, "yaw": 0, "roll": 0},
+            scale={"x": 2, "y": 2, "z": 1}
+        )
+    """
+    unreal = get_unreal_connection()
+    try:
+        params = {"actor_type": actor_type}
+        if name:
+            params["name"] = name
+        if location:
+            params["location"] = location
+        if rotation:
+            params["rotation"] = rotation
+        if scale:
+            params["scale"] = scale
+        if mesh_path:
+            params["mesh_path"] = mesh_path
+        response = unreal.send_command("spawn_basic_actor", params)
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"spawn_basic_actor error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@mcp.tool()
+def set_actor_material(
+    actor_name: str,
+    material_path: str
+) -> Dict[str, Any]:
+    """
+    Apply a material to an actor's mesh component.
+    
+    Args:
+        actor_name: Name of the target actor
+        material_path: Path to the material asset (e.g., "/Game/Materials/M_Material")
+    
+    Returns:
+        Dictionary with success status, actor name, and material path
+    
+    Example:
+        set_actor_material(
+            actor_name="MaterialBall",
+            material_path="/Game/Materials/M_Lookdev_Gray"
+        )
+    """
+    unreal = get_unreal_connection()
+    try:
+        params = {
+            "actor_name": actor_name,
+            "material_path": material_path
+        }
+        response = unreal.send_command("set_actor_material", params)
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"set_actor_material error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+# ============================================================================
 # Main Entry Point
 # ============================================================================
 

@@ -39,7 +39,7 @@ Rendering MCP is a comprehensive toolkit that enables AI agents to analyze Rende
     │ • Buffer data access      │    │ • Lighting control        │
     │ • Pipeline state          │    │ • Viewport capture        │
     │                           │    │                           │
-    │ 20 tools                  │    │ 22 tools                  │
+    │ 20 tools                  │    │ 26 tools                  │
     └───────────────────────────┘    └───────────────────────────┘
 ```
 
@@ -198,7 +198,7 @@ Skills are domain-specific guides that help AI agents work effectively with this
 | **Texture** | `get_texture_info`, `get_texture_data`, `save_texture` |
 | **Mesh/Buffer** | `get_mesh_data`, `export_mesh_as_fbx`, `get_buffer_contents`, `export_mesh_csv` |
 
-### Unreal Render MCP (22 Tools)
+### Unreal Render MCP (26 Tools)
 
 | Category | Tools |
 |----------|-------|
@@ -208,6 +208,8 @@ Skills are domain-specific guides that help AI agents work effectively with this
 | **Texture** | `import_texture`, `set_texture_properties` |
 | **Mesh** | `import_fbx`, `create_static_mesh_from_data` |
 | **Lights** | `create_light`, `set_light_properties`, `get_lights`, `delete_light` |
+| **Post Process** | `create_post_process_volume`, `set_post_process_settings` |
+| **Actor Spawning** | `spawn_basic_actor`, `set_actor_material` |
 | **Viewport** | `get_viewport_screenshot` |
 
 ---

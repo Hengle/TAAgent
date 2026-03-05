@@ -272,6 +272,22 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleCommand(const FSt
     {
         return FEpicUnrealMCPEnvironmentCommands::HandleDeleteLight(Params);
     }
+    else if (CommandType == TEXT("create_post_process_volume"))
+    {
+        return FEpicUnrealMCPEnvironmentCommands::HandleCreatePostProcessVolume(Params);
+    }
+    else if (CommandType == TEXT("set_post_process_settings"))
+    {
+        return FEpicUnrealMCPEnvironmentCommands::HandleSetPostProcessSettings(Params);
+    }
+    else if (CommandType == TEXT("spawn_basic_actor"))
+    {
+        return FEpicUnrealMCPEnvironmentCommands::HandleSpawnBasicActor(Params);
+    }
+    else if (CommandType == TEXT("set_actor_material"))
+    {
+        return FEpicUnrealMCPEnvironmentCommands::HandleSetActorMaterial(Params);
+    }
 
     return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown blueprint command: %s"), *CommandType));
 }

@@ -54,6 +54,7 @@
 #include "Commands/EpicUnrealMCPEditorCommands.h"
 #include "Commands/EpicUnrealMCPBlueprintCommands.h"
 #include "Commands/EpicUnrealMCPBlueprintGraphCommands.h"
+#include "Commands/EpicUnrealMCPEnvironmentCommands.h"
 #include "Commands/EpicUnrealMCPCommonUtils.h"
 
 // Default settings
@@ -66,6 +67,7 @@ UEpicUnrealMCPBridge::UEpicUnrealMCPBridge()
     BlueprintCommands = MakeShared<FEpicUnrealMCPBlueprintCommands>();
     BlueprintGraphCommands = MakeShared<FEpicUnrealMCPBlueprintGraphCommands>();
     NiagaraCommands = MakeShared<FEpicUnrealMCPNiagaraCommands>();
+    EnvironmentCommands = MakeShared<FEpicUnrealMCPEnvironmentCommands>();
 }
 
 UEpicUnrealMCPBridge::~UEpicUnrealMCPBridge()
@@ -74,6 +76,7 @@ UEpicUnrealMCPBridge::~UEpicUnrealMCPBridge()
     BlueprintCommands.Reset();
     BlueprintGraphCommands.Reset();
     NiagaraCommands.Reset();
+    EnvironmentCommands.Reset();
 }
 
 // Initialize subsystem
@@ -261,14 +264,22 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
                     CommandType == TEXT("get_material_properties") ||
                     CommandType == TEXT("get_material_connections") ||
                     CommandType == TEXT("import_texture") ||
-                    CommandType == TEXT("set_static_mesh_asset_properties") ||
-                    CommandType == TEXT("get_viewport_screenshot") ||
-                    CommandType == TEXT("create_light") ||
-                    CommandType == TEXT("set_light_properties") ||
-                    CommandType == TEXT("get_lights") ||
-                    CommandType == TEXT("delete_light"))
+                    CommandType == TEXT("set_static_mesh_asset_properties"))
             {
                 ResultJson = BlueprintCommands->HandleCommand(CommandType, Params);
+            }
+            // Environment Commands
+            else if (CommandType == TEXT("get_viewport_screenshot") ||
+                     CommandType == TEXT("create_light") ||
+                     CommandType == TEXT("set_light_properties") ||
+                     CommandType == TEXT("get_lights") ||
+                     CommandType == TEXT("delete_light") ||
+                     CommandType == TEXT("create_post_process_volume") ||
+                     CommandType == TEXT("set_post_process_settings") ||
+                     CommandType == TEXT("spawn_basic_actor") ||
+                     CommandType == TEXT("set_actor_material"))
+            {
+                ResultJson = EnvironmentCommands->HandleCommand(CommandType, Params);
             }
             // Blueprint Graph Commands
             else if (CommandType == TEXT("add_blueprint_node") ||
