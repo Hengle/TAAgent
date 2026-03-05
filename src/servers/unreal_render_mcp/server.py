@@ -5,13 +5,16 @@ Unreal Render MCP Server
 包含材质、纹理、网格导入相关的15个工具
 
 工具列表:
-- 材质管理 (10个): create_material, create_material_instance, create_material_function,
-  set_material_instance_parameter, set_material_properties, compile_material,
-  get_material_expressions, get_material_functions, get_material_function_content,
-  get_available_materials
-- 材质节点 (2个): add_material_expression, connect_material_nodes
+- 材质图构建 (1个): build_material_graph
+- 材质分析 (5个): compile_material, get_material_expressions, get_material_functions, 
+  get_material_function_content, get_material_properties, get_material_connections, get_available_materials
+- 通用资产操作 (6个): create_asset, delete_asset, set_asset_properties, get_asset_properties,
+  batch_create_assets, batch_set_assets_properties
+- 通用Actor操作 (8个): spawn_actor, delete_actor, get_actors, set_actor_properties, 
+  get_actor_properties, batch_spawn_actors, batch_delete_actors, batch_set_actors_properties
 - 纹理导入 (2个): import_texture, set_texture_properties
-- 网格导入 (1个): import_fbx
+- 网格导入 (2个): import_fbx, create_static_mesh_from_data
+- 视口截图 (1个): get_viewport_screenshot
 """
 
 import logging
@@ -301,163 +304,78 @@ mcp = FastMCP(
 
 
 # ============================================================================
-# Material Creation Tools (10 tools)
+# Material Graph Builder (Recommended)
 # ============================================================================
 
 @mcp.tool()
-def create_material(name: str) -> Dict[str, Any]:
-    """
-    Create a new empty material asset.
-    
-    Args:
-        name: Name for the new material
-    
-    Returns:
-        Dictionary with material name, path, and creation status
-    """
-    unreal = get_unreal_connection()
-    try:
-        response = unreal.send_command("create_material", {"name": name})
-        return response or {"success": False, "message": "No response from Unreal"}
-    except Exception as e:
-        logger.error(f"create_material error: {e}")
-        return {"success": False, "message": str(e)}
-
-
-@mcp.tool()
-def create_material_instance(
-    name: str,
-    parent_material: str,
-    destination_path: str = "/Game/Materials/Instances/"
-) -> Dict[str, Any]:
-    """
-    Create a new material instance asset.
-    
-    Args:
-        name: Name for the new material instance
-        parent_material: Path to the parent material (e.g., "/Game/Materials/M_Base")
-        destination_path: Path where to create the material instance (default: /Game/Materials/Instances/)
-    
-    Returns:
-        Dictionary with material instance name, path, and creation status
-    """
-    unreal = get_unreal_connection()
-    try:
-        params = {
-            "name": name,
-            "parent_material": parent_material,
-            "destination_path": destination_path
-        }
-        response = unreal.send_command("create_material_instance", params)
-        return response or {"success": False, "message": "No response from Unreal"}
-    except Exception as e:
-        logger.error(f"create_material_instance error: {e}")
-        return {"success": False, "message": str(e)}
-
-
-@mcp.tool()
-def create_material_function(
-    name: str,
-    path: str = None,
-    description: str = None
-) -> Dict[str, Any]:
-    """
-    Create a new material function asset.
-    
-    Args:
-        name: Name for the new material function
-        path: Optional path (default: /Game/MaterialFunctions/)
-        description: Optional description for the function
-    
-    Returns:
-        Dictionary with function name, path, and creation status
-    """
-    unreal = get_unreal_connection()
-    try:
-        params = {"name": name}
-        if path:
-            params["path"] = path
-        if description:
-            params["description"] = description
-        response = unreal.send_command("create_material_function", params)
-        return response or {"success": False, "message": "No response from Unreal"}
-    except Exception as e:
-        logger.error(f"create_material_function error: {e}")
-        return {"success": False, "message": str(e)}
-
-
-@mcp.tool()
-def set_material_instance_parameter(
-    material_instance: str,
-    parameter_name: str,
-    parameter_type: str,
-    value: Any
-) -> Dict[str, Any]:
-    """
-    Set a parameter in a material instance.
-    
-    Args:
-        material_instance: Path to the material instance (e.g., "/Game/Materials/MI_Base.MI_Base")
-        parameter_name: Name of the parameter
-        parameter_type: Type of parameter - "scalar", "vector", or "texture"
-        value: Parameter value (float for scalar, dict for vector, string path for texture)
-    
-    Returns:
-        Dictionary with success status
-    """
-    unreal = get_unreal_connection()
-    try:
-        params = {
-            "material_instance": material_instance,
-            "parameter_name": parameter_name,
-            "parameter_type": parameter_type,
-            "value": value
-        }
-        response = unreal.send_command("set_material_instance_parameter", params)
-        return response or {"success": False, "message": "No response from Unreal"}
-    except Exception as e:
-        logger.error(f"set_material_instance_parameter error: {e}")
-        return {"success": False, "message": str(e)}
-
-
-@mcp.tool()
-def set_material_properties(
+def build_material_graph(
     material_name: str,
-    shading_model: str = None,
-    blend_mode: str = None,
-    two_sided: bool = None,
-    material_domain: str = None
+    nodes: List[Dict[str, Any]],
+    connections: List[Dict[str, Any]] = None,
+    properties: Dict[str, Any] = None,
+    compile: bool = True
 ) -> Dict[str, Any]:
     """
-    Set material properties.
+    Build an entire material graph in a single call (batch operation).
+    
+    This is the recommended way to create materials. It replaces multiple
+    add_material_expression and connect_material_nodes calls with a single
+    atomic operation.
     
     Args:
-        material_name: Name or path of the material
-        shading_model: Unlit, DefaultLit, Subsurface, TwoSidedFoliage
-        blend_mode: Opaque, Masked, Translucent, Additive
-        two_sided: Whether material is two-sided
-        material_domain: Surface, DeferredDecal, LightFunction, Volume, PostProcess, UserInterface
+        material_name: Name or path of the material (must already exist)
+        nodes: List of node definitions, each containing:
+            - id: Unique node identifier (user-defined)
+            - type: Expression type (Constant, Constant3Vector, Multiply, TextureSample, etc.)
+            - pos_x, pos_y: Node position in graph (optional)
+            - ... type-specific properties (value, texture, parameter_name, etc.)
+        connections: List of connection definitions, each containing:
+            - source: Source node ID
+            - target: Target node ID (use "Material" for material properties)
+            - source_output: Output pin name (default: "Output")
+            - target_input: Input pin name or material property name
+        properties: Optional material properties to set (shading_model, blend_mode, etc.)
+        compile: Whether to compile the material after building (default: True)
     
     Returns:
-        Dictionary with success status
+        Dictionary with success status, node_count, connection_count
+    
+    Example:
+        build_material_graph(
+            material_name="M_MyMaterial",
+            nodes=[
+                {"id": "color", "type": "Constant3Vector", "pos_x": -300, "pos_y": 0, "value": [1.0, 0.0, 0.0]},
+                {"id": "roughness", "type": "Constant", "pos_x": -300, "pos_y": 200, "value": 0.5}
+            ],
+            connections=[
+                {"source": "color", "target": "Material", "target_input": "BaseColor"},
+                {"source": "roughness", "target": "Material", "target_input": "Roughness"}
+            ],
+            properties={"shading_model": "DefaultLit"}
+        )
     """
     unreal = get_unreal_connection()
     try:
-        params = {"material_name": material_name}
-        if shading_model:
-            params["shading_model"] = shading_model
-        if blend_mode:
-            params["blend_mode"] = blend_mode
-        if two_sided is not None:
-            params["two_sided"] = two_sided
-        if material_domain:
-            params["material_domain"] = material_domain
-        response = unreal.send_command("set_material_properties", params)
+        params = {
+            "material_name": material_name,
+            "nodes": nodes,
+            "compile": compile
+        }
+        if connections:
+            params["connections"] = connections
+        if properties:
+            params["properties"] = properties
+        
+        response = unreal.send_command("build_material_graph", params)
         return response or {"success": False, "message": "No response from Unreal"}
     except Exception as e:
-        logger.error(f"set_material_properties error: {e}")
+        logger.error(f"build_material_graph error: {e}")
         return {"success": False, "message": str(e)}
 
+
+# ============================================================================
+# Material Analysis Tools (7 tools)
+# ============================================================================
 
 @mcp.tool()
 def compile_material(material_name: str) -> Dict[str, Any]:
@@ -617,212 +535,6 @@ def get_available_materials(search_path: str = "/Game/") -> Dict[str, Any]:
         return response or {"success": False, "message": "No response from Unreal"}
     except Exception as e:
         logger.error(f"get_available_materials error: {e}")
-        return {"success": False, "message": str(e)}
-
-
-# ============================================================================
-# Material Node Tools (2 tools)
-# ============================================================================
-
-@mcp.tool()
-def add_material_expression(
-    material_name: str,
-    expression_type: str,
-    pos_x: int = 0,
-    pos_y: int = 0,
-    value: List[float] = None,
-    texture: str = None,
-    mask: List[bool] = None,
-    code: str = None,
-    description: str = None,
-    output_type: str = None,
-    inputs: List[str] = None,
-    parameter_name: str = None,
-    group: str = None,
-    sampler_type: str = None
-) -> Dict[str, Any]:
-    """
-    [DEPRECATED] Use build_material_graph instead for batch operations.
-    
-    Add a material expression node to a material, or update an existing node.
-    
-    Args:
-        material_name: Name or path of the material
-        expression_type: Type of expression (Constant, Constant3Vector, Multiply, Add, TextureSample, Custom, etc.)
-        pos_x: X position in material graph
-        pos_y: Y position in material graph
-        value: Value for constant/parameter expressions: [value] or [r, g, b, a]
-        texture: Texture path for TextureSample/TextureParameter expressions
-        mask: Channel mask for ComponentMask [R, G, B, A]
-        code: HLSL code for Custom expression
-        description: Description/name for Custom expression node
-        output_type: Output type for Custom expression: "Float1", "Float2", "Float3", "Float4"
-        inputs: Input pin names for Custom expression (e.g., ["Input1", "Input2"])
-        parameter_name: Name for parameter nodes (exposed in material instance)
-        group: Group name for organizing parameters in material instance editor
-        sampler_type: Sampler type for TextureSampleParameter2D: "Color", "Normal", "Grayscale", "Alpha", "LinearColor"
-    
-    Returns:
-        Dictionary with success status, node_id, and position
-    
-    Supported expression types:
-        Basic Math: Constant, Constant2Vector, Constant3Vector, Constant4Vector,
-                   Multiply, Add, Subtract, Divide, Lerp, Clamp, Power, Abs,
-                   Floor, Ceil, Frac, Sine, Cosine, DotProduct, CrossProduct,
-                   OneMinus, Normalize, Saturate, SquareRoot, Min, Max, Round, Sign
-        
-        Texture: TextureSample, TextureCoordinate, TextureObject, Panner, Rotator
-        
-        Parameters: ScalarParameter, VectorParameter, TextureObjectParameter,
-                   TextureSampleParameter2D, StaticBoolParameter
-        
-        Utility: Time, ComponentMask, AppendVector, Reroute,
-                WorldPosition, ObjectPosition, VertexNormal, VertexTangent,
-                Fresnel, DepthFade, CameraPosition, CameraVector,
-                PixelDepth, SceneDepth, ReflectionVector, LightVector,
-                Distance, Desaturation, If, StaticSwitch, Custom
-    """
-    logger.warning("add_material_expression is deprecated. Use build_material_graph for better performance.")
-    unreal = get_unreal_connection()
-    try:
-        params = {
-            "material_name": material_name,
-            "expression_type": expression_type,
-            "pos_x": pos_x,
-            "pos_y": pos_y
-        }
-        if value is not None:
-            params["value"] = value
-        if texture is not None:
-            params["texture"] = texture
-        if mask is not None:
-            params["mask"] = mask
-        if code is not None:
-            params["code"] = code
-        if description is not None:
-            params["description"] = description
-        if output_type is not None:
-            params["output_type"] = output_type
-        if inputs is not None:
-            params["inputs"] = inputs
-        if parameter_name is not None:
-            params["parameter_name"] = parameter_name
-        if group is not None:
-            params["group"] = group
-        if sampler_type is not None:
-            params["sampler_type"] = sampler_type
-        
-        response = unreal.send_command("add_material_expression", params)
-        return response or {"success": False, "message": "No response from Unreal"}
-    except Exception as e:
-        logger.error(f"add_material_expression error: {e}")
-        return {"success": False, "message": str(e)}
-
-
-@mcp.tool()
-def connect_material_nodes(
-    material_name: str,
-    source_node: str,
-    source_output: str = "Output",
-    target_node: str = None,
-    target_input: str = None
-) -> Dict[str, Any]:
-    """
-    Connect material expression nodes or connect to material property.
-    
-    Args:
-        material_name: Name or path of the material
-        source_node: Source expression node ID
-        source_output: Output name on source node (usually "Output")
-        target_node: Target expression node ID (use "Material" for material property)
-        target_input: Input name on target node or material property name
-    
-    Material properties: BaseColor, Metallic, Specular, Roughness, Normal,
-    EmissiveColor, Opacity, OpacityMask, WorldPositionOffset, AmbientOcclusion
-    
-    Returns:
-        Dictionary with success status and connection details
-    """
-    logger.warning("connect_material_nodes is deprecated. Use build_material_graph for better performance.")
-    unreal = get_unreal_connection()
-    try:
-        params = {
-            "material_name": material_name,
-            "source_node": source_node,
-            "source_output": source_output,
-            "target_node": target_node,
-            "target_input": target_input
-        }
-        response = unreal.send_command("connect_material_nodes", params)
-        return response or {"success": False, "message": "No response from Unreal"}
-    except Exception as e:
-        logger.error(f"connect_material_nodes error: {e}")
-        return {"success": False, "message": str(e)}
-
-
-@mcp.tool()
-def build_material_graph(
-    material_name: str,
-    nodes: List[Dict[str, Any]],
-    connections: List[Dict[str, Any]] = None,
-    properties: Dict[str, Any] = None,
-    compile: bool = True
-) -> Dict[str, Any]:
-    """
-    Build an entire material graph in a single call (batch operation).
-    
-    This is the recommended way to create materials. It replaces multiple
-    add_material_expression and connect_material_nodes calls with a single
-    atomic operation.
-    
-    Args:
-        material_name: Name or path of the material (must already exist)
-        nodes: List of node definitions, each containing:
-            - id: Unique node identifier (user-defined)
-            - type: Expression type (Constant, Constant3Vector, Multiply, TextureSample, etc.)
-            - pos_x, pos_y: Node position in graph (optional)
-            - ... type-specific properties (value, texture, parameter_name, etc.)
-        connections: List of connection definitions, each containing:
-            - source: Source node ID
-            - target: Target node ID (use "Material" for material properties)
-            - source_output: Output pin name (default: "Output")
-            - target_input: Input pin name or material property name
-        properties: Optional material properties to set (shading_model, blend_mode, etc.)
-        compile: Whether to compile the material after building (default: True)
-    
-    Returns:
-        Dictionary with success status, node_count, connection_count
-    
-    Example:
-        build_material_graph(
-            material_name="M_MyMaterial",
-            nodes=[
-                {"id": "color", "type": "Constant3Vector", "pos_x": -300, "pos_y": 0, "value": [1.0, 0.0, 0.0]},
-                {"id": "roughness", "type": "Constant", "pos_x": -300, "pos_y": 200, "value": 0.5}
-            ],
-            connections=[
-                {"source": "color", "target": "Material", "target_input": "BaseColor"},
-                {"source": "roughness", "target": "Material", "target_input": "Roughness"}
-            ],
-            properties={"shading_model": "DefaultLit"}
-        )
-    """
-    unreal = get_unreal_connection()
-    try:
-        params = {
-            "material_name": material_name,
-            "nodes": nodes,
-            "compile": compile
-        }
-        if connections:
-            params["connections"] = connections
-        if properties:
-            params["properties"] = properties
-        
-        response = unreal.send_command("build_material_graph", params)
-        return response or {"success": False, "message": "No response from Unreal"}
-    except Exception as e:
-        logger.error(f"build_material_graph error: {e}")
         return {"success": False, "message": str(e)}
 
 
@@ -1097,421 +809,7 @@ def get_viewport_screenshot(
 
 
 # ============================================================================
-# Light Tools (4 tools)
-# ============================================================================
-
-@mcp.tool()
-def create_light(
-    light_type: str = "point",
-    name: str = None,
-    location: List[float] = None,
-    rotation: List[float] = None,
-    intensity: float = None,
-    color: List[float] = None,
-    mobility: str = "movable",
-    cast_shadows: bool = True,
-    attenuation_radius: float = None,
-    inner_cone_angle: float = None,
-    outer_cone_angle: float = None,
-    source_radius: float = None
-) -> Dict[str, Any]:
-    """
-    Create a light in the scene.
-    
-    Args:
-        light_type: Type of light - "point", "directional", "spot", "rect" (default: "point")
-        name: Name for the light (auto-generated if not provided)
-        location: World position [x, y, z] (default: [0, 0, 200])
-        rotation: World rotation [pitch, yaw, roll] in degrees (default: [0, 0, 0])
-        intensity: Light intensity/brightness
-        color: Light color [r, g, b] or [r, g, b, a] (0.0-1.0)
-        mobility: "movable", "stationary", or "static" (default: "movable")
-        cast_shadows: Whether light casts shadows (default: True)
-        attenuation_radius: Attenuation radius for point/spot lights
-        inner_cone_angle: Inner cone angle for spot lights (degrees)
-        outer_cone_angle: Outer cone angle for spot lights (degrees)
-        source_radius: Source radius for point/spot lights (soft shadows)
-    
-    Returns:
-        Dictionary with light name, type, and actor path
-    """
-    unreal = get_unreal_connection()
-    try:
-        params = {"light_type": light_type}
-        if name:
-            params["name"] = name
-        if location:
-            params["location"] = location
-        if rotation:
-            params["rotation"] = rotation
-        if intensity is not None:
-            params["intensity"] = intensity
-        if color:
-            params["color"] = color
-        params["mobility"] = mobility
-        params["cast_shadows"] = cast_shadows
-        if attenuation_radius is not None:
-            params["attenuation_radius"] = attenuation_radius
-        if inner_cone_angle is not None:
-            params["inner_cone_angle"] = inner_cone_angle
-        if outer_cone_angle is not None:
-            params["outer_cone_angle"] = outer_cone_angle
-        if source_radius is not None:
-            params["source_radius"] = source_radius
-        
-        response = unreal.send_command("create_light", params)
-        return response or {"success": False, "message": "No response from Unreal"}
-    except Exception as e:
-        logger.error(f"create_light error: {e}")
-        return {"success": False, "message": str(e)}
-
-
-@mcp.tool()
-def set_light_properties(
-    name: str,
-    intensity: float = None,
-    color: List[float] = None,
-    temperature: float = None,
-    use_temperature: bool = None,
-    cast_shadows: bool = None,
-    affects_world: bool = None,
-    location: List[float] = None,
-    rotation: List[float] = None,
-    attenuation_radius: float = None,
-    inner_cone_angle: float = None,
-    outer_cone_angle: float = None,
-    source_radius: float = None,
-    source_length: float = None,
-    shadow_distance: float = None
-) -> Dict[str, Any]:
-    """
-    Set properties of an existing light.
-    
-    Args:
-        name: Name or path of the light
-        intensity: Light intensity/brightness
-        color: Light color [r, g, b] or [r, g, b, a] (0.0-1.0)
-        temperature: Color temperature in Kelvin (1700-12000)
-        use_temperature: Whether to use temperature instead of color
-        cast_shadows: Whether light casts shadows
-        affects_world: Whether light affects the world
-        location: World position [x, y, z]
-        rotation: World rotation [pitch, yaw, roll] in degrees
-        attenuation_radius: Attenuation radius for point/spot lights
-        inner_cone_angle: Inner cone angle for spot lights (degrees)
-        outer_cone_angle: Outer cone angle for spot lights (degrees)
-        source_radius: Source radius for soft shadows
-        source_length: Source length for point lights
-        shadow_distance: Shadow distance for directional lights
-    
-    Returns:
-        Dictionary with success status and modification info
-    """
-    unreal = get_unreal_connection()
-    try:
-        params = {"name": name}
-        if intensity is not None:
-            params["intensity"] = intensity
-        if color:
-            params["color"] = color
-        if temperature is not None:
-            params["temperature"] = temperature
-        if use_temperature is not None:
-            params["use_temperature"] = use_temperature
-        if cast_shadows is not None:
-            params["cast_shadows"] = cast_shadows
-        if affects_world is not None:
-            params["affects_world"] = affects_world
-        if location:
-            params["location"] = location
-        if rotation:
-            params["rotation"] = rotation
-        if attenuation_radius is not None:
-            params["attenuation_radius"] = attenuation_radius
-        if inner_cone_angle is not None:
-            params["inner_cone_angle"] = inner_cone_angle
-        if outer_cone_angle is not None:
-            params["outer_cone_angle"] = outer_cone_angle
-        if source_radius is not None:
-            params["source_radius"] = source_radius
-        if source_length is not None:
-            params["source_length"] = source_length
-        if shadow_distance is not None:
-            params["shadow_distance"] = shadow_distance
-        
-        response = unreal.send_command("set_light_properties", params)
-        return response or {"success": False, "message": "No response from Unreal"}
-    except Exception as e:
-        logger.error(f"set_light_properties error: {e}")
-        return {"success": False, "message": str(e)}
-
-
-@mcp.tool()
-def get_lights(light_type: str = None) -> Dict[str, Any]:
-    """
-    Get list of all lights in the current level.
-    
-    Args:
-        light_type: Optional filter by type - "point", "directional", "spot", "rect"
-    
-    Returns:
-        Dictionary with list of lights, each containing:
-        - name: Light actor name
-        - label: Actor label
-        - light_type: Type of light
-        - path: Full actor path
-        - location: World position [x, y, z]
-        - rotation: World rotation [pitch, yaw, roll]
-        - intensity: Light intensity
-        - color: Light color [r, g, b, a]
-        - cast_shadows: Whether casts shadows
-        - affects_world: Whether affects world
-        - mobility: Component mobility type
-    """
-    unreal = get_unreal_connection()
-    try:
-        params = {}
-        if light_type:
-            params["light_type"] = light_type
-        response = unreal.send_command("get_lights", params)
-        return response or {"success": False, "message": "No response from Unreal"}
-    except Exception as e:
-        logger.error(f"get_lights error: {e}")
-        return {"success": False, "message": str(e)}
-
-
-@mcp.tool()
-def delete_light(name: str) -> Dict[str, Any]:
-    """
-    Delete a light from the scene.
-    
-    Args:
-        name: Name or path of the light to delete
-    
-    Returns:
-        Dictionary with success status and deleted light name
-    """
-    unreal = get_unreal_connection()
-    try:
-        response = unreal.send_command("delete_light", {"name": name})
-        return response or {"success": False, "message": "No response from Unreal"}
-    except Exception as e:
-        logger.error(f"delete_light error: {e}")
-        return {"success": False, "message": str(e)}
-
-
-# ============================================================================
-# Post Process Tools (2 tools)
-# ============================================================================
-
-@mcp.tool()
-def create_post_process_volume(
-    name: str = "PostProcessVolume_Lookdev",
-    location: Dict[str, float] = None,
-    scale: Dict[str, float] = None
-) -> Dict[str, Any]:
-    """
-    Create a Post Process Volume for lookdev environment setup.
-    
-    Creates a volume with default Lookdev settings:
-    - Manual exposure mode (EV100=0)
-    - Bloom disabled
-    - Vignette disabled
-    - Ambient Occlusion disabled
-    
-    Args:
-        name: Name for the volume (default: "PostProcessVolume_Lookdev")
-        location: World position {"x": 0, "y": 0, "z": 0} (default: origin)
-        scale: Volume scale {"x": 1000, "y": 1000, "z": 1000} (default: large unbound)
-    
-    Returns:
-        Dictionary with success status, volume name, location, and scale
-    
-    Example:
-        create_post_process_volume(name="Lookdev_PP", location={"x": 0, "y": 0, "z": 0})
-    """
-    unreal = get_unreal_connection()
-    try:
-        params = {"name": name}
-        if location:
-            params["location"] = location
-        if scale:
-            params["scale"] = scale
-        response = unreal.send_command("create_post_process_volume", params)
-        return response or {"success": False, "message": "No response from Unreal"}
-    except Exception as e:
-        logger.error(f"create_post_process_volume error: {e}")
-        return {"success": False, "message": str(e)}
-
-
-@mcp.tool()
-def set_post_process_settings(
-    name: str = None,
-    exposure_mode: str = None,
-    exposure_bias: float = None,
-    exposure_value: float = None,
-    bloom_enabled: bool = None,
-    vignette_enabled: bool = None,
-    ao_enabled: bool = None,
-    unbound: bool = None,
-    enabled: bool = None
-) -> Dict[str, Any]:
-    """
-    Set Post Process Volume settings for lookdev environment.
-    
-    Args:
-        name: Name of the volume (if None, uses first available)
-        exposure_mode: "manual" or "auto" (default: manual for lookdev)
-        exposure_bias: Exposure bias value (default: 0 for EV100=0)
-        exposure_value: Camera exposure value (default: 0 for EV100=0)
-        bloom_enabled: Enable/disable bloom (default: False for lookdev)
-        vignette_enabled: Enable/disable vignette (default: False for lookdev)
-        ao_enabled: Enable/disable ambient occlusion (default: False for lookdev)
-        unbound: Whether volume affects entire scene (default: True)
-        enabled: Whether volume is active (default: True)
-    
-    Returns:
-        Dictionary with success status and applied settings
-    
-    Example:
-        # Set manual exposure for lookdev
-        set_post_process_settings(
-            name="Lookdev_PP",
-            exposure_mode="manual",
-            exposure_value=0,
-            bloom_enabled=False,
-            vignette_enabled=False
-        )
-    """
-    unreal = get_unreal_connection()
-    try:
-        params = {}
-        if name:
-            params["name"] = name
-        if exposure_mode:
-            params["exposure_mode"] = exposure_mode
-        if exposure_bias is not None:
-            params["exposure_bias"] = exposure_bias
-        if exposure_value is not None:
-            params["exposure_value"] = exposure_value
-        if bloom_enabled is not None:
-            params["bloom_enabled"] = bloom_enabled
-        if vignette_enabled is not None:
-            params["vignette_enabled"] = vignette_enabled
-        if ao_enabled is not None:
-            params["ao_enabled"] = ao_enabled
-        if unbound is not None:
-            params["unbound"] = unbound
-        if enabled is not None:
-            params["enabled"] = enabled
-        response = unreal.send_command("set_post_process_settings", params)
-        return response or {"success": False, "message": "No response from Unreal"}
-    except Exception as e:
-        logger.error(f"set_post_process_settings error: {e}")
-        return {"success": False, "message": str(e)}
-
-
-# ============================================================================
-# Actor Spawning Tools (2 tools)
-# ============================================================================
-
-@mcp.tool()
-def spawn_basic_actor(
-    actor_type: str,
-    name: str = None,
-    location: Dict[str, float] = None,
-    rotation: Dict[str, float] = None,
-    scale: Dict[str, float] = None,
-    mesh_path: str = None
-) -> Dict[str, Any]:
-    """
-    Spawn a basic actor in the scene for lookdev purposes.
-    
-    Args:
-        actor_type: Type of actor - "Sphere", "Cube", "Plane", "Cylinder", or "StaticMeshActor"
-        name: Name for the actor (auto-generated if not provided)
-        location: World position {"x": 0, "y": 0, "z": 0} (default: origin)
-        rotation: Rotation in degrees {"pitch": 0, "yaw": 0, "roll": 0} (default: zero)
-        scale: Scale factors {"x": 1, "y": 1, "z": 1} (default: unit scale)
-        mesh_path: Static mesh asset path (for StaticMeshActor type)
-    
-    Returns:
-        Dictionary with success status, actor name, type, and transform
-    
-    Example:
-        # Spawn a material ball (sphere)
-        spawn_basic_actor(
-            actor_type="Sphere",
-            name="MaterialBall",
-            location={"x": 0, "y": 0, "z": 100},
-            scale={"x": 1, "y": 1, "z": 1}
-        )
-        
-        # Spawn a gray card (plane)
-        spawn_basic_actor(
-            actor_type="Plane",
-            name="GrayCard",
-            location={"x": 200, "y": 0, "z": 0},
-            rotation={"pitch": 0, "yaw": 0, "roll": 0},
-            scale={"x": 2, "y": 2, "z": 1}
-        )
-    """
-    unreal = get_unreal_connection()
-    try:
-        params = {"actor_type": actor_type}
-        if name:
-            params["name"] = name
-        if location:
-            params["location"] = location
-        if rotation:
-            params["rotation"] = rotation
-        if scale:
-            params["scale"] = scale
-        if mesh_path:
-            params["mesh_path"] = mesh_path
-        response = unreal.send_command("spawn_basic_actor", params)
-        return response or {"success": False, "message": "No response from Unreal"}
-    except Exception as e:
-        logger.error(f"spawn_basic_actor error: {e}")
-        return {"success": False, "message": str(e)}
-
-
-@mcp.tool()
-def set_actor_material(
-    actor_name: str,
-    material_path: str
-) -> Dict[str, Any]:
-    """
-    Apply a material to an actor's mesh component.
-    
-    Args:
-        actor_name: Name of the target actor
-        material_path: Path to the material asset (e.g., "/Game/Materials/M_Material")
-    
-    Returns:
-        Dictionary with success status, actor name, and material path
-    
-    Example:
-        set_actor_material(
-            actor_name="MaterialBall",
-            material_path="/Game/Materials/M_Lookdev_Gray"
-        )
-    """
-    unreal = get_unreal_connection()
-    try:
-        params = {
-            "actor_name": actor_name,
-            "material_path": material_path
-        }
-        response = unreal.send_command("set_actor_material", params)
-        return response or {"success": False, "message": "No response from Unreal"}
-    except Exception as e:
-        logger.error(f"set_actor_material error: {e}")
-        return {"success": False, "message": str(e)}
-
-
-# ============================================================================
-# Generic Actor Management Tools (Refactored - 5 Core Tools)
+# Generic Actor Management Tools (8 tools)
 # ============================================================================
 
 @mcp.tool()
@@ -1526,7 +824,7 @@ def spawn_actor(
     """
     Spawn any actor by class name. Uses UE reflection for universal actor creation.
     
-    This is the new generic actor spawning tool that replaces spawn_basic_actor and create_light.
+    This is the new generic actor spawning tool.
     Supports any actor type without code changes through UE's reflection system.
     
     Args:
@@ -1767,10 +1065,6 @@ def get_actor_properties(
         return {"success": False, "message": str(e)}
 
 
-# ============================================================================
-# Batch Actor Management Tools (批量操作)
-# ============================================================================
-
 @mcp.tool()
 def batch_spawn_actors(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
@@ -1860,7 +1154,7 @@ def batch_set_actors_properties(actors: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 # ============================================================================
-# Generic Asset Management Tools (通用资产操作 - Refactored)
+# Generic Asset Management Tools (6 tools)
 # ============================================================================
 
 @mcp.tool()

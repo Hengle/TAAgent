@@ -86,7 +86,7 @@ python src/scripts/install_extension.py
 | **Texture** | `get_texture_info`, `get_texture_data`, `save_texture` |
 | **Mesh** | `get_mesh_data`, `export_mesh_as_fbx`, `get_buffer_contents`, `export_mesh_csv` |
 
-### Unreal Render MCP (24 Tools)
+### Unreal Render MCP (24 Tools - Clean)
 
 **Generic Asset Tools** (6) - *New reflection-based*
 ```python
