@@ -80,30 +80,4 @@ public:
     /** Find component on actor by class or name pattern */
     static UActorComponent* FindActorComponent(AActor* Actor, const FString& ComponentPattern);
     
-    // ============================================================================
-    // Legacy Compatibility (Deprecated - Use Generic Tools Instead)
-    // ============================================================================
-    UE_DEPRECATED(5.0, "Use spawn_actor with actor_class instead")
-    static TSharedPtr<FJsonObject> HandleCreateLight(const TSharedPtr<FJsonObject>& Params);
-    
-    UE_DEPRECATED(5.0, "Use set_actor_properties instead")
-    static TSharedPtr<FJsonObject> HandleSetLightProperties(const TSharedPtr<FJsonObject>& Params);
-    
-    UE_DEPRECATED(5.0, "Use get_actors with filter instead")
-    static TSharedPtr<FJsonObject> HandleGetLights(const TSharedPtr<FJsonObject>& Params);
-    
-    UE_DEPRECATED(5.0, "Use delete_actor instead")
-    static TSharedPtr<FJsonObject> HandleDeleteLight(const TSharedPtr<FJsonObject>& Params);
-    
-    UE_DEPRECATED(5.0, "Use spawn_actor with actor_class=PostProcessVolume instead")
-    static TSharedPtr<FJsonObject> HandleCreatePostProcessVolume(const TSharedPtr<FJsonObject>& Params);
-    
-    UE_DEPRECATED(5.0, "Use set_actor_properties instead")
-    static TSharedPtr<FJsonObject> HandleSetPostProcessSettings(const TSharedPtr<FJsonObject>& Params);
-    
-    UE_DEPRECATED(5.0, "Use spawn_actor with actor_class=StaticMeshActor and properties instead")
-    static TSharedPtr<FJsonObject> HandleSpawnBasicActor(const TSharedPtr<FJsonObject>& Params);
-    
-    UE_DEPRECATED(5.0, "Use set_actor_properties with material property instead")
-    static TSharedPtr<FJsonObject> HandleSetActorMaterial(const TSharedPtr<FJsonObject>& Params);
 };

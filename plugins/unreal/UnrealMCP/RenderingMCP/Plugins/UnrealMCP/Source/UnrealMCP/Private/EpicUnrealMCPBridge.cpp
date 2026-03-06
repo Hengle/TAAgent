@@ -268,21 +268,11 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
             }
             // Environment Commands (Generic Actor Management - 5 Core Tools)
             else if (CommandType == TEXT("get_viewport_screenshot") ||
-                     // New generic actor tools (refactored with reflection)
                      CommandType == TEXT("spawn_actor") ||
                      CommandType == TEXT("delete_actor") ||
                      CommandType == TEXT("get_actors") ||
                      CommandType == TEXT("set_actor_properties") ||
-                     CommandType == TEXT("get_actor_properties") ||
-                     // Legacy compatibility (deprecated)
-                     CommandType == TEXT("create_light") ||
-                     CommandType == TEXT("set_light_properties") ||
-                     CommandType == TEXT("get_lights") ||
-                     CommandType == TEXT("delete_light") ||
-                     CommandType == TEXT("create_post_process_volume") ||
-                     CommandType == TEXT("set_post_process_settings") ||
-                     CommandType == TEXT("spawn_basic_actor") ||
-                     CommandType == TEXT("set_actor_material"))
+                     CommandType == TEXT("get_actor_properties"))
             {
                 ResultJson = FEpicUnrealMCPEnvironmentCommands::HandleCommand(CommandType, Params);
             }

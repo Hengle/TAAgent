@@ -218,39 +218,6 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleCommand(const F
     {
         return HandleGetViewportScreenshot(Params);
     }
-    // Legacy compatibility (deprecated)
-    else if (CommandType == TEXT("create_light"))
-    {
-        return HandleCreateLight(Params);
-    }
-    else if (CommandType == TEXT("set_light_properties"))
-    {
-        return HandleSetLightProperties(Params);
-    }
-    else if (CommandType == TEXT("get_lights"))
-    {
-        return HandleGetLights(Params);
-    }
-    else if (CommandType == TEXT("delete_light"))
-    {
-        return HandleDeleteLight(Params);
-    }
-    else if (CommandType == TEXT("create_post_process_volume"))
-    {
-        return HandleCreatePostProcessVolume(Params);
-    }
-    else if (CommandType == TEXT("set_post_process_settings"))
-    {
-        return HandleSetPostProcessSettings(Params);
-    }
-    else if (CommandType == TEXT("spawn_basic_actor"))
-    {
-        return HandleSpawnBasicActor(Params);
-    }
-    else if (CommandType == TEXT("set_actor_material"))
-    {
-        return HandleSetActorMaterial(Params);
-    }
     
     return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown environment command: %s"), *CommandType));
 }
@@ -1184,69 +1151,6 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleGetActorPropert
     ResultObj->SetObjectField(TEXT("properties"), PropertiesObj);
 
     return ResultObj;
-}
-
-// ============================================================================
-// Legacy Compatibility (Deprecated)
-// ============================================================================
-TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleCreateLight(const TSharedPtr<FJsonObject>& Params)
-{
-    // Convert to spawn_actor
-    FString LightType;
-    if (Params->TryGetStringField(TEXT("light_type"), LightType))
-    {
-        TSharedPtr<FJsonObject> NewParams = MakeShared<FJsonObject>(*Params);
-        NewParams->SetStringField(TEXT("actor_class"), LightType);
-        return HandleSpawnActor(NewParams);
-    }
-    return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("create_light is deprecated, use spawn_actor with actor_class"));
-}
-
-TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleSetLightProperties(const TSharedPtr<FJsonObject>& Params)
-{
-    return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("set_light_properties is deprecated, use set_actor_properties instead"));
-}
-
-TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleGetLights(const TSharedPtr<FJsonObject>& Params)
-{
-    TSharedPtr<FJsonObject> NewParams = MakeShared<FJsonObject>(*Params);
-    NewParams->SetStringField(TEXT("actor_class"), TEXT("Light"));
-    return HandleGetActors(NewParams);
-}
-
-TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleDeleteLight(const TSharedPtr<FJsonObject>& Params)
-{
-    return HandleDeleteActor(Params);
-}
-
-TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleCreatePostProcessVolume(const TSharedPtr<FJsonObject>& Params)
-{
-    TSharedPtr<FJsonObject> NewParams = MakeShared<FJsonObject>(*Params);
-    NewParams->SetStringField(TEXT("actor_class"), TEXT("PostProcessVolume"));
-    return HandleSpawnActor(NewParams);
-}
-
-TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleSetPostProcessSettings(const TSharedPtr<FJsonObject>& Params)
-{
-    return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("set_post_process_settings is deprecated, use set_actor_properties instead"));
-}
-
-TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleSpawnBasicActor(const TSharedPtr<FJsonObject>& Params)
-{
-    // Convert actor_type to actor_class
-    FString ActorType;
-    if (Params->TryGetStringField(TEXT("actor_type"), ActorType))
-    {
-        TSharedPtr<FJsonObject> NewParams = MakeShared<FJsonObject>(*Params);
-        NewParams->SetStringField(TEXT("actor_class"), ActorType);
-        return HandleSpawnActor(NewParams);
-    }
-    return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("spawn_basic_actor is deprecated, use spawn_actor with actor_class"));
-}
-
-TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleSetActorMaterial(const TSharedPtr<FJsonObject>& Params)
-{
-    return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("set_actor_material is deprecated, use set_actor_properties with material property instead"));
 }
 
 // ============================================================================

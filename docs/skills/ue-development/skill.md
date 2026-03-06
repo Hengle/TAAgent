@@ -164,10 +164,14 @@ get_material_function_content("/Engine/Functions/Engine_MaterialFunctions01/Text
 | `get_material_expressions` | `get_material_graph` (nodes field) |
 | `get_material_connections` | `get_material_graph` (connections field) |
 | `get_material_properties` | `get_asset_properties` |
-| `create_material` | `create_asset("Material", ...)` |
-| `set_material_properties` | `set_asset_properties(...)` |
 | `create_light` | `spawn_actor("DirectionalLight", ...)` |
 | `set_light_properties` | `set_actor_properties(...)` |
+| `get_lights` | `get_actors(actor_class="Light")` |
+| `delete_light` | `delete_actor(name)` |
+| `create_post_process_volume` | `spawn_actor("PostProcessVolume", ...)` |
+| `set_post_process_settings` | `set_actor_properties(...)` |
+| `spawn_basic_actor` | `spawn_actor(actor_class="...")` |
+| `set_actor_material` | `set_actor_properties(...)` |
 
 ## Common Property Names
 
