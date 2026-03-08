@@ -36,16 +36,6 @@ private:
     // FBX import
     TSharedPtr<FJsonObject> HandleImportFBX(const TSharedPtr<FJsonObject>& Params);
 
-    // Texture import
-    TSharedPtr<FJsonObject> HandleImportTexture(const TSharedPtr<FJsonObject>& Params);
-
-    // Texture properties
-    TSharedPtr<FJsonObject> HandleSetTextureProperties(const TSharedPtr<FJsonObject>& Params);
-
-    // Material instance
-    TSharedPtr<FJsonObject> HandleCreateMaterialInstance(const TSharedPtr<FJsonObject>& Params);
-    TSharedPtr<FJsonObject> HandleSetMaterialInstanceParameter(const TSharedPtr<FJsonObject>& Params);
-
     // Static mesh from data
     TSharedPtr<FJsonObject> HandleCreateStaticMeshFromData(const TSharedPtr<FJsonObject>& Params);
 

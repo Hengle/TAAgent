@@ -39,33 +39,23 @@ FEpicUnrealMCPNiagaraCommands::FEpicUnrealMCPNiagaraCommands()
 
 TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleCommand(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
 {
-    if (CommandType == TEXT("get_niagara_asset_details"))
+    // Graph Form Tools
+    if (CommandType == TEXT("get_niagara_graph"))
     {
-        return HandleGetNiagaraAssetDetails(Params);
+        return HandleGetNiagaraGraph(Params);
     }
-    else if (CommandType == TEXT("update_niagara_asset"))
+    else if (CommandType == TEXT("update_niagara_graph"))
     {
-        return HandleUpdateNiagaraAsset(Params);
+        return HandleUpdateNiagaraGraph(Params);
     }
-    else if (CommandType == TEXT("analyze_stateless_compatibility"))
+    // Emitter Form Tools
+    else if (CommandType == TEXT("get_niagara_emitter"))
     {
-        return HandleAnalyzeStatelessCompatibility(Params);
+        return HandleGetNiagaraEmitter(Params);
     }
-    else if (CommandType == TEXT("convert_to_stateless"))
+    else if (CommandType == TEXT("update_niagara_emitter"))
     {
-        return HandleConvertToStateless(Params);
-    }
-    else if (CommandType == TEXT("get_niagara_module_graph"))
-    {
-        return HandleGetNiagaraModuleGraph(Params);
-    }
-    else if (CommandType == TEXT("get_niagara_script_asset"))
-    {
-        return HandleGetNiagaraScriptAsset(Params);
-    }
-    else if (CommandType == TEXT("update_niagara_script_asset"))
-    {
-        return HandleUpdateNiagaraScriptAsset(Params);
+        return HandleUpdateNiagaraEmitter(Params);
     }
     else
     {
@@ -82,10 +72,10 @@ UNiagaraSystem* FEpicUnrealMCPNiagaraCommands::LoadNiagaraSystemAsset(const FStr
 }
 
 // ============================================================================
-// Read Operations Implementation
+// Emitter Form Tools - Read Operations Implementation
 // ============================================================================
 
-TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleGetNiagaraAssetDetails(const TSharedPtr<FJsonObject>& Params)
+TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleGetNiagaraEmitter(const TSharedPtr<FJsonObject>& Params)
 {
     TSharedPtr<FJsonObject> Result = MakeShareable(new FJsonObject);
     
@@ -413,6 +403,13 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetEmitterDetails(FNiagar
         EmitterJson->SetArrayField(TEXT("parameters"), ParametersJson);
     }
     
+    // Stateless compatibility analysis (Standard mode only)
+    if (!bIsStateless && ShouldInclude(IncludeSections, TEXT("stateless_analysis")))
+    {
+        TSharedPtr<FJsonObject> Analysis = AnalyzeStatelessCompatibility(Handle);
+        EmitterJson->SetObjectField(TEXT("stateless_analysis"), Analysis);
+    }
+    
     return EmitterJson;
 }
 
@@ -549,10 +546,10 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetSimulationStageDetails
 }
 
 // ============================================================================
-// Update Operations Implementation
+// Emitter Form Tools - Update Operations Implementation
 // ============================================================================
 
-TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraAsset(const TSharedPtr<FJsonObject>& Params)
+TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraEmitter(const TSharedPtr<FJsonObject>& Params)
 {
     TSharedPtr<FJsonObject> Result = MakeShareable(new FJsonObject);
     
@@ -887,6 +884,153 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::ProcessEmitterOperation(U
             Result->SetBoolField(TEXT("success"), false);
             Result->SetStringField(TEXT("error"), TEXT("Failed to add module to stack"));
         }
+    }
+    // Convert to Stateless mode (UE 5.7+)
+    else if (Action == TEXT("convert_to_stateless"))
+    {
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 7)
+        // Check if already Stateless
+        if (Handle->GetEmitterMode() == ENiagaraEmitterMode::Stateless)
+        {
+            Result->SetBoolField(TEXT("success"), true);
+            Result->SetStringField(TEXT("message"), TEXT("Emitter is already in Stateless mode"));
+            return Result;
+        }
+        
+        // Optional: force conversion even with warnings
+        bool bForce = false;
+        Op->TryGetBoolField(TEXT("force"), bForce);
+        
+        // Analyze compatibility
+        TSharedPtr<FJsonObject> Analysis = AnalyzeStatelessCompatibility(*Handle);
+        bool bCanConvert = Analysis->GetBoolField(TEXT("can_convert"));
+        
+        if (!bCanConvert && !bForce)
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), TEXT("Emitter is not convertible. Use 'force=true' to attempt anyway."));
+            Result->SetObjectField(TEXT("analysis"), Analysis);
+            return Result;
+        }
+        
+        // Get parameter values before conversion
+        FVersionedNiagaraEmitterData* EmitterData = Handle->GetEmitterData();
+        TMap<FString, float> FloatValues;
+        TMap<FString, FVector3f> VectorValues;
+        TMap<FString, FVector4f> ColorValues;
+        
+        auto CaptureParamValues = [&](UNiagaraScript* Script)
+        {
+            if (!Script) return;
+            
+            const FNiagaraParameterStore& ParamStore = Script->RapidIterationParameters;
+            TArrayView<const FNiagaraVariableWithOffset> ParamVariables = ParamStore.ReadParameterVariables();
+            
+            for (const FNiagaraVariableWithOffset& ParamWithOffset : ParamVariables)
+            {
+                FString ParamName = ParamWithOffset.GetName().ToString();
+                int32 Offset = ParamWithOffset.Offset;
+                const FNiagaraTypeDefinition& TypeDef = ParamWithOffset.GetType();
+                
+                if (TypeDef == FNiagaraTypeDefinition::GetFloatDef())
+                {
+                    FloatValues.Add(ParamName, ParamStore.GetParameterValueFromOffset<float>(Offset));
+                }
+                else if (TypeDef == FNiagaraTypeDefinition::GetVec3Def() || 
+                         TypeDef == FNiagaraTypeDefinition::GetPositionDef())
+                {
+                    VectorValues.Add(ParamName, ParamStore.GetParameterValueFromOffset<FVector3f>(Offset));
+                }
+                else if (TypeDef == FNiagaraTypeDefinition::GetVec4Def() ||
+                         TypeDef == FNiagaraTypeDefinition::GetColorDef())
+                {
+                    ColorValues.Add(ParamName, ParamStore.GetParameterValueFromOffset<FVector4f>(Offset));
+                }
+            }
+        };
+        
+        if (EmitterData)
+        {
+            if (EmitterData->SpawnScriptProps.Script)
+            {
+                CaptureParamValues(EmitterData->SpawnScriptProps.Script);
+            }
+            if (EmitterData->UpdateScriptProps.Script)
+            {
+                CaptureParamValues(EmitterData->UpdateScriptProps.Script);
+            }
+        }
+        
+        // Switch to Stateless mode
+        Handle->SetEmitterMode(*System, ENiagaraEmitterMode::Stateless);
+        
+        // Get the Stateless emitter and migrate parameters
+        UNiagaraStatelessEmitter* StatelessEmitter = Handle->GetStatelessEmitter();
+        if (StatelessEmitter)
+        {
+            TArray<TSharedPtr<FJsonValue>> MigratedParams;
+            
+            for (UNiagaraStatelessModule* Module : StatelessEmitter->GetModules())
+            {
+                if (!Module) continue;
+                
+                FString ModuleName = Module->GetName();
+                FString ParamPattern;
+                
+                if (ModuleName == TEXT("Lifetime")) ParamPattern = TEXT("Particles.Lifetime");
+                else if (ModuleName == TEXT("Color")) ParamPattern = TEXT("Particles.Color");
+                else if (ModuleName == TEXT("Size")) ParamPattern = TEXT("Particles.SpriteSize");
+                else if (ModuleName == TEXT("Scale")) ParamPattern = TEXT("Particles.Scale");
+                else if (ModuleName == TEXT("Rotation")) ParamPattern = TEXT("Particles.SpriteRotation");
+                else if (ModuleName == TEXT("Velocity")) ParamPattern = TEXT("Particles.Velocity");
+                else if (ModuleName == TEXT("SpawnRate")) ParamPattern = TEXT("SpawnRate");
+                else continue;
+                
+                // Migrate float values
+                for (auto& Pair : FloatValues)
+                {
+                    if (Pair.Key.StartsWith(ParamPattern))
+                    {
+                        FProperty* Property = Module->GetClass()->FindPropertyByName(TEXT("Value"));
+                        if (!Property)
+                        {
+                            if (ModuleName == TEXT("Lifetime")) Property = Module->GetClass()->FindPropertyByName(TEXT("Lifetime"));
+                            else if (ModuleName == TEXT("SpawnRate")) Property = Module->GetClass()->FindPropertyByName(TEXT("SpawnRate"));
+                        }
+                        
+                        if (Property)
+                        {
+                            if (FFloatProperty* FloatProp = CastField<FFloatProperty>(Property))
+                            {
+                                FloatProp->SetValue_InContainer(Module, Pair.Value);
+                                
+                                TSharedPtr<FJsonObject> Migrated = MakeShareable(new FJsonObject);
+                                Migrated->SetStringField(TEXT("parameter"), Pair.Key);
+                                Migrated->SetStringField(TEXT("module"), ModuleName);
+                                Migrated->SetNumberField(TEXT("value"), Pair.Value);
+                                MigratedParams.Add(MakeShareable(new FJsonValueObject(Migrated)));
+                            }
+                        }
+                    }
+                }
+            }
+            
+            Result->SetBoolField(TEXT("success"), true);
+            Result->SetStringField(TEXT("action"), TEXT("convert_to_stateless"));
+            Result->SetStringField(TEXT("emitter_name"), EmitterName);
+            Result->SetStringField(TEXT("new_mode"), TEXT("Stateless"));
+            Result->SetArrayField(TEXT("migrated_parameters"), MigratedParams);
+            Result->SetNumberField(TEXT("migrated_count"), MigratedParams.Num());
+        }
+        else
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), TEXT("Failed to get StatelessEmitter after mode switch"));
+        }
+#else
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), TEXT("Stateless conversion requires UE 5.7 or later"));
+#endif
     }
     else
     {
@@ -1549,56 +1693,29 @@ static const FStandardModuleMapping* FindStandardModuleMapping(const FString& No
     return BestMatch;
 }
 
-TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleAnalyzeStatelessCompatibility(const TSharedPtr<FJsonObject>& Params)
+// ============================================================================
+// Stateless Helper Functions (Internal)
+// ============================================================================
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::AnalyzeStatelessCompatibility(FNiagaraEmitterHandle& Handle)
 {
     TSharedPtr<FJsonObject> Result = MakeShareable(new FJsonObject);
     
-    FString AssetPath;
-    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath))
-    {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), TEXT("Missing required parameter: asset_path"));
-        return Result;
-    }
-    
-    FString EmitterName;
-    if (!Params->TryGetStringField(TEXT("emitter"), EmitterName))
-    {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), TEXT("Missing required parameter: emitter"));
-        return Result;
-    }
-    
-    UNiagaraSystem* NiagaraSystem = LoadNiagaraSystemAsset(AssetPath);
-    if (!NiagaraSystem)
-    {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to load Niagara system: %s"), *AssetPath));
-        return Result;
-    }
-    
-    FNiagaraEmitterHandle* Handle = FindEmitterHandle(NiagaraSystem, EmitterName);
-    if (!Handle)
-    {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Emitter not found: %s"), *EmitterName));
-        return Result;
-    }
+    FString EmitterName = Handle.GetName().ToString();
     
     // Check if already Stateless
-    if (Handle->GetEmitterMode() == ENiagaraEmitterMode::Stateless)
+    if (Handle.GetEmitterMode() == ENiagaraEmitterMode::Stateless)
     {
-        Result->SetBoolField(TEXT("success"), true);
         Result->SetBoolField(TEXT("is_stateless"), true);
         Result->SetStringField(TEXT("message"), TEXT("Emitter is already in Stateless mode"));
         return Result;
     }
     
-    FVersionedNiagaraEmitterData* EmitterData = Handle->GetEmitterData();
+    FVersionedNiagaraEmitterData* EmitterData = Handle.GetEmitterData();
     if (!EmitterData)
     {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), TEXT("Failed to get emitter data"));
+        Result->SetBoolField(TEXT("error"), true);
+        Result->SetStringField(TEXT("message"), TEXT("Failed to get emitter data"));
         return Result;
     }
     
@@ -1819,355 +1936,157 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleAnalyzeStatelessCom
     return Result;
 }
 
-TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleConvertToStateless(const TSharedPtr<FJsonObject>& Params)
+// ============================================================================
+// Graph Form Tools - Read/Update Niagara Script Graphs
+// ============================================================================
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleGetNiagaraGraph(const TSharedPtr<FJsonObject>& Params)
 {
     TSharedPtr<FJsonObject> Result = MakeShareable(new FJsonObject);
     
-#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 7)
+    // Method 1: Direct script path for standalone assets
+    FString ScriptPath;
+    bool bUseStandaloneScript = Params->TryGetStringField(TEXT("script_path"), ScriptPath);
+    
+    // Method 2: Locate script within System's Emitter
     FString AssetPath;
-    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath))
-    {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), TEXT("Missing required parameter: asset_path"));
-        return Result;
-    }
-    
     FString EmitterName;
-    if (!Params->TryGetStringField(TEXT("emitter"), EmitterName))
-    {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), TEXT("Missing required parameter: emitter"));
-        return Result;
-    }
-    
-    // Optional: force conversion even with warnings
-    bool bForce = false;
-    Params->TryGetBoolField(TEXT("force"), bForce);
-    
-    UNiagaraSystem* NiagaraSystem = LoadNiagaraSystemAsset(AssetPath);
-    if (!NiagaraSystem)
-    {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to load Niagara system: %s"), *AssetPath));
-        return Result;
-    }
-    
-    FNiagaraEmitterHandle* Handle = FindEmitterHandle(NiagaraSystem, EmitterName);
-    if (!Handle)
-    {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Emitter not found: %s"), *EmitterName));
-        return Result;
-    }
-    
-    // Check if already Stateless
-    if (Handle->GetEmitterMode() == ENiagaraEmitterMode::Stateless)
-    {
-        Result->SetBoolField(TEXT("success"), true);
-        Result->SetStringField(TEXT("message"), TEXT("Emitter is already in Stateless mode"));
-        return Result;
-    }
-    
-    // First, analyze compatibility
-    TSharedPtr<FJsonObject> Analysis = MakeShareable(new FJsonObject);
-    {
-        TSharedPtr<FJsonObject> AnalyzeParams = MakeShareable(new FJsonObject);
-        AnalyzeParams->SetStringField(TEXT("asset_path"), AssetPath);
-        AnalyzeParams->SetStringField(TEXT("emitter"), EmitterName);
-        Analysis = HandleAnalyzeStatelessCompatibility(AnalyzeParams);
-    }
-    
-    bool bCanConvert = Analysis->GetBoolField(TEXT("can_convert"));
-    if (!bCanConvert && !bForce)
-    {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), TEXT("Emitter is not convertible. Use 'force=true' to attempt anyway."));
-        Result->SetObjectField(TEXT("analysis"), Analysis);
-        return Result;
-    }
-    
-    // Get parameter values before conversion
-    FVersionedNiagaraEmitterData* EmitterData = Handle->GetEmitterData();
-    TMap<FString, float> FloatValues;
-    TMap<FString, FVector3f> VectorValues;
-    TMap<FString, FVector4f> ColorValues;
-    
-    auto CaptureParamValues = [&](UNiagaraScript* Script)
-    {
-        if (!Script) return;
-        
-        const FNiagaraParameterStore& ParamStore = Script->RapidIterationParameters;
-        TArrayView<const FNiagaraVariableWithOffset> ParamVariables = ParamStore.ReadParameterVariables();
-        
-        for (const FNiagaraVariableWithOffset& ParamWithOffset : ParamVariables)
-        {
-            FString ParamName = ParamWithOffset.GetName().ToString();
-            int32 Offset = ParamWithOffset.Offset;
-            const FNiagaraTypeDefinition& TypeDef = ParamWithOffset.GetType();
-            
-            if (TypeDef == FNiagaraTypeDefinition::GetFloatDef())
-            {
-                FloatValues.Add(ParamName, ParamStore.GetParameterValueFromOffset<float>(Offset));
-            }
-            else if (TypeDef == FNiagaraTypeDefinition::GetVec3Def() || 
-                     TypeDef == FNiagaraTypeDefinition::GetPositionDef())
-            {
-                VectorValues.Add(ParamName, ParamStore.GetParameterValueFromOffset<FVector3f>(Offset));
-            }
-            else if (TypeDef == FNiagaraTypeDefinition::GetVec4Def() ||
-                     TypeDef == FNiagaraTypeDefinition::GetColorDef())
-            {
-                ColorValues.Add(ParamName, ParamStore.GetParameterValueFromOffset<FVector4f>(Offset));
-            }
-        }
-    };
-    
-    if (EmitterData->SpawnScriptProps.Script)
-    {
-        CaptureParamValues(EmitterData->SpawnScriptProps.Script);
-    }
-    if (EmitterData->UpdateScriptProps.Script)
-    {
-        CaptureParamValues(EmitterData->UpdateScriptProps.Script);
-    }
-    
-    // Switch to Stateless mode
-    Handle->SetEmitterMode(*NiagaraSystem, ENiagaraEmitterMode::Stateless);
-    
-    // Get the Stateless emitter
-    UNiagaraStatelessEmitter* StatelessEmitter = Handle->GetStatelessEmitter();
-    if (!StatelessEmitter)
-    {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), TEXT("Failed to get StatelessEmitter after mode switch"));
-        return Result;
-    }
-    
-    // Migrate parameter values to Stateless modules
-    TArray<TSharedPtr<FJsonValue>> MigratedParams;
-    TArray<TSharedPtr<FJsonValue>> FailedParams;
-    
-    for (UNiagaraStatelessModule* Module : StatelessEmitter->GetModules())
-    {
-        if (!Module) continue;
-        
-        FString ModuleName = Module->GetName();
-        
-        // Try to migrate values for this module
-        // Map module name to parameter pattern
-        FString ParamPattern;
-        if (ModuleName == TEXT("Lifetime")) ParamPattern = TEXT("Particles.Lifetime");
-        else if (ModuleName == TEXT("Color")) ParamPattern = TEXT("Particles.Color");
-        else if (ModuleName == TEXT("Size")) ParamPattern = TEXT("Particles.SpriteSize");
-        else if (ModuleName == TEXT("Scale")) ParamPattern = TEXT("Particles.Scale");
-        else if (ModuleName == TEXT("Rotation")) ParamPattern = TEXT("Particles.SpriteRotation");
-        else if (ModuleName == TEXT("Velocity")) ParamPattern = TEXT("Particles.Velocity");
-        else if (ModuleName == TEXT("SpawnRate")) ParamPattern = TEXT("SpawnRate");
-        else continue;
-        
-        // Find matching parameters
-        for (auto& Pair : FloatValues)
-        {
-            if (Pair.Key.StartsWith(ParamPattern))
-            {
-                // Try to set the value via reflection
-                FProperty* Property = Module->GetClass()->FindPropertyByName(TEXT("Value"));
-                if (!Property)
-                {
-                    // Try common property names based on module type
-                    if (ModuleName == TEXT("Lifetime"))
-                    {
-                        Property = Module->GetClass()->FindPropertyByName(TEXT("Lifetime"));
-                    }
-                    else if (ModuleName == TEXT("SpawnRate"))
-                    {
-                        Property = Module->GetClass()->FindPropertyByName(TEXT("SpawnRate"));
-                    }
-                }
-                
-                if (Property)
-                {
-                    if (FFloatProperty* FloatProp = CastField<FFloatProperty>(Property))
-                    {
-                        FloatProp->SetValue_InContainer(Module, Pair.Value);
-                        
-                        TSharedPtr<FJsonObject> Migrated = MakeShareable(new FJsonObject);
-                        Migrated->SetStringField(TEXT("parameter"), Pair.Key);
-                        Migrated->SetStringField(TEXT("module"), ModuleName);
-                        Migrated->SetNumberField(TEXT("value"), Pair.Value);
-                        MigratedParams.Add(MakeShareable(new FJsonValueObject(Migrated)));
-                    }
-                }
-            }
-        }
-        
-        for (auto& Pair : VectorValues)
-        {
-            if (Pair.Key.StartsWith(ParamPattern))
-            {
-                FProperty* Property = Module->GetClass()->FindPropertyByName(TEXT("Value"));
-                if (!Property)
-                {
-                    Property = Module->GetClass()->FindPropertyByName(*ModuleName);
-                }
-                
-                if (Property && CastField<FStructProperty>(Property))
-                {
-                    FStructProperty* StructProp = CastField<FStructProperty>(Property);
-                    if (StructProp->Struct == TBaseStructure<FVector>::Get())
-                    {
-                        StructProp->SetValue_InContainer(Module, &Pair.Value);
-                        
-                        TSharedPtr<FJsonObject> Migrated = MakeShareable(new FJsonObject);
-                        Migrated->SetStringField(TEXT("parameter"), Pair.Key);
-                        Migrated->SetStringField(TEXT("module"), ModuleName);
-                        TArray<TSharedPtr<FJsonValue>> VecArray;
-                        VecArray.Add(MakeShareable(new FJsonValueNumber(Pair.Value.X)));
-                        VecArray.Add(MakeShareable(new FJsonValueNumber(Pair.Value.Y)));
-                        VecArray.Add(MakeShareable(new FJsonValueNumber(Pair.Value.Z)));
-                        Migrated->SetArrayField(TEXT("value"), VecArray);
-                        MigratedParams.Add(MakeShareable(new FJsonValueObject(Migrated)));
-                    }
-                }
-            }
-        }
-        
-        for (auto& Pair : ColorValues)
-        {
-            if (Pair.Key.StartsWith(ParamPattern))
-            {
-                FProperty* Property = Module->GetClass()->FindPropertyByName(TEXT("Color"));
-                if (!Property)
-                {
-                    Property = Module->GetClass()->FindPropertyByName(TEXT("Value"));
-                }
-                
-                if (Property && CastField<FStructProperty>(Property))
-                {
-                    FStructProperty* StructProp = CastField<FStructProperty>(Property);
-                    if (StructProp->Struct == TBaseStructure<FLinearColor>::Get())
-                    {
-                        FLinearColor ColorValue(Pair.Value.X, Pair.Value.Y, Pair.Value.Z, Pair.Value.W);
-                        StructProp->SetValue_InContainer(Module, &ColorValue);
-                        
-                        TSharedPtr<FJsonObject> Migrated = MakeShareable(new FJsonObject);
-                        Migrated->SetStringField(TEXT("parameter"), Pair.Key);
-                        Migrated->SetStringField(TEXT("module"), ModuleName);
-                        TArray<TSharedPtr<FJsonValue>> ColorArray;
-                        ColorArray.Add(MakeShareable(new FJsonValueNumber(Pair.Value.X)));
-                        ColorArray.Add(MakeShareable(new FJsonValueNumber(Pair.Value.Y)));
-                        ColorArray.Add(MakeShareable(new FJsonValueNumber(Pair.Value.Z)));
-                        ColorArray.Add(MakeShareable(new FJsonValueNumber(Pair.Value.W)));
-                        Migrated->SetArrayField(TEXT("value"), ColorArray);
-                        MigratedParams.Add(MakeShareable(new FJsonValueObject(Migrated)));
-                    }
-                }
-            }
-        }
-    }
-    
-    // Mark package dirty
-    NiagaraSystem->MarkPackageDirty();
-    
-    Result->SetBoolField(TEXT("success"), true);
-    Result->SetStringField(TEXT("emitter_name"), EmitterName);
-    Result->SetStringField(TEXT("new_mode"), TEXT("Stateless"));
-    Result->SetArrayField(TEXT("migrated_parameters"), MigratedParams);
-    Result->SetNumberField(TEXT("migrated_count"), MigratedParams.Num());
-    Result->SetArrayField(TEXT("failed_parameters"), FailedParams);
-    
-    FString Message = FString::Printf(TEXT("Converted to Stateless. %d parameters migrated."), MigratedParams.Num());
-    Result->SetStringField(TEXT("message"), Message);
-    
-#else
-    Result->SetBoolField(TEXT("success"), false);
-    Result->SetStringField(TEXT("error"), TEXT("Stateless conversion requires UE 5.7 or later"));
-#endif
-    
-    return Result;
-}
-
-// ============================================================================
-// Niagara Module Graph Implementation
-// ============================================================================
-
-TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleGetNiagaraModuleGraph(const TSharedPtr<FJsonObject>& Params)
-{
-    TSharedPtr<FJsonObject> Result = MakeShareable(new FJsonObject);
-    
-    FString AssetPath;
-    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath))
-    {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), TEXT("Missing required parameter: asset_path"));
-        return Result;
-    }
-    
-    FString EmitterName;
-    if (!Params->TryGetStringField(TEXT("emitter"), EmitterName))
-    {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), TEXT("Missing required parameter: emitter"));
-        return Result;
-    }
-    
     FString ScriptType = TEXT("spawn");
-    Params->TryGetStringField(TEXT("script"), ScriptType);
+    
+    if (!bUseStandaloneScript)
+    {
+        if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath))
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), TEXT("Must provide either (asset_path + emitter) or script_path"));
+            return Result;
+        }
+        
+        if (!Params->TryGetStringField(TEXT("emitter"), EmitterName))
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), TEXT("Must provide either (asset_path + emitter) or script_path"));
+            return Result;
+        }
+        
+        Params->TryGetStringField(TEXT("script"), ScriptType);
+    }
     
     // Optional: filter by module name
     FString ModuleName;
     Params->TryGetStringField(TEXT("module"), ModuleName);
     
-    UNiagaraSystem* NiagaraSystem = LoadNiagaraSystemAsset(AssetPath);
-    if (!NiagaraSystem)
-    {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to load Niagara system: %s"), *AssetPath));
-        return Result;
-    }
-    
-    FNiagaraEmitterHandle* Handle = FindEmitterHandle(NiagaraSystem, EmitterName);
-    if (!Handle)
-    {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Emitter not found: %s"), *EmitterName));
-        return Result;
-    }
-    
-    FVersionedNiagaraEmitterData* EmitterData = Handle->GetEmitterData();
-    if (!EmitterData)
-    {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), TEXT("Failed to get emitter data"));
-        return Result;
-    }
-    
     // Get the script
     UNiagaraScript* Script = nullptr;
-    if (ScriptType.ToLower() == TEXT("spawn"))
+    FString SourceLocation;  // For result metadata
+    
+    if (bUseStandaloneScript)
     {
-        Script = EmitterData->SpawnScriptProps.Script;
+        // Load standalone script asset
+        Script = LoadObject<UNiagaraScript>(nullptr, *ScriptPath);
+        if (!Script)
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to load Niagara script: %s"), *ScriptPath));
+            return Result;
+        }
+        SourceLocation = ScriptPath;
     }
-    else if (ScriptType.ToLower() == TEXT("update"))
+    else
     {
-        Script = EmitterData->UpdateScriptProps.Script;
+        // Load script from System's Emitter
+        UNiagaraSystem* NiagaraSystem = LoadNiagaraSystemAsset(AssetPath);
+        if (!NiagaraSystem)
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to load Niagara system: %s"), *AssetPath));
+            return Result;
+        }
+        
+        FNiagaraEmitterHandle* Handle = FindEmitterHandle(NiagaraSystem, EmitterName);
+        if (!Handle)
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Emitter not found: %s"), *EmitterName));
+            return Result;
+        }
+        
+        FVersionedNiagaraEmitterData* EmitterData = Handle->GetEmitterData();
+        if (!EmitterData)
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), TEXT("Failed to get emitter data"));
+            return Result;
+        }
+        
+        if (ScriptType.ToLower() == TEXT("spawn"))
+        {
+            Script = EmitterData->SpawnScriptProps.Script;
+        }
+        else if (ScriptType.ToLower() == TEXT("update"))
+        {
+            Script = EmitterData->UpdateScriptProps.Script;
+        }
+        
+        if (!Script)
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Script not found: %s"), *ScriptType));
+            return Result;
+        }
+        
+        SourceLocation = FString::Printf(TEXT("%s:%s:%s"), *AssetPath, *EmitterName, *ScriptType);
     }
+    
+    // Extract graph using helper function
+    return ExtractGraphFromScript(Script, ModuleName);
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::ExtractGraphFromScript(UNiagaraScript* Script, const FString& ModuleFilter)
+{
+    TSharedPtr<FJsonObject> Result = MakeShareable(new FJsonObject);
     
     if (!Script)
     {
         Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Script not found: %s"), *ScriptType));
+        Result->SetStringField(TEXT("error"), TEXT("Script is null"));
         return Result;
     }
+    
+    // Get script metadata
+    Result->SetBoolField(TEXT("success"), true);
+    Result->SetStringField(TEXT("script_name"), Script->GetName());
+    
+    // Get script usage
+    FString UsageStr = TEXT("Unknown");
+    switch (Script->GetUsage())
+    {
+        case ENiagaraScriptUsage::Function: UsageStr = TEXT("Function"); break;
+        case ENiagaraScriptUsage::Module: UsageStr = TEXT("Module"); break;
+        case ENiagaraScriptUsage::DynamicInput: UsageStr = TEXT("DynamicInput"); break;
+        case ENiagaraScriptUsage::ParticleSpawnScript: UsageStr = TEXT("ParticleSpawn"); break;
+        case ENiagaraScriptUsage::ParticleUpdateScript: UsageStr = TEXT("ParticleUpdate"); break;
+        case ENiagaraScriptUsage::EmitterSpawnScript: UsageStr = TEXT("EmitterSpawn"); break;
+        case ENiagaraScriptUsage::EmitterUpdateScript: UsageStr = TEXT("EmitterUpdate"); break;
+        case ENiagaraScriptUsage::SystemSpawnScript: UsageStr = TEXT("SystemSpawn"); break;
+        case ENiagaraScriptUsage::SystemUpdateScript: UsageStr = TEXT("SystemUpdate"); break;
+        case ENiagaraScriptUsage::ParticleEventScript: UsageStr = TEXT("ParticleEvent"); break;
+        default: break;
+    }
+    Result->SetStringField(TEXT("usage"), UsageStr);
+    
+    // Get description
+    Result->SetStringField(TEXT("description"), Script->GetDescription(FGuid()).ToString());
     
     UNiagaraScriptSource* Source = Cast<UNiagaraScriptSource>(Script->GetLatestSource());
     UNiagaraGraph* Graph = Source ? Source->NodeGraph : nullptr;
     if (!Graph)
     {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), TEXT("Failed to get Niagara graph"));
+        Result->SetBoolField(TEXT("has_graph"), false);
         return Result;
     }
+    
+    Result->SetBoolField(TEXT("has_graph"), true);
     
     // Build node ID map
     TMap<UEdGraphNode*, FString> NodeIdMap;
@@ -2191,10 +2110,10 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleGetNiagaraModuleGra
         if (!Node) continue;
         
         // Optional: filter by module name
-        if (!ModuleName.IsEmpty())
+        if (!ModuleFilter.IsEmpty())
         {
             FString NodeName = Node->GetName();
-            if (!NodeName.Contains(ModuleName))
+            if (!NodeName.Contains(ModuleFilter))
             {
                 continue;
             }
@@ -2214,15 +2133,26 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleGetNiagaraModuleGra
         }
     }
     
-    // Build result
-    Result->SetBoolField(TEXT("success"), true);
-    Result->SetStringField(TEXT("asset_path"), AssetPath);
-    Result->SetStringField(TEXT("emitter_name"), EmitterName);
-    Result->SetStringField(TEXT("script_type"), ScriptType);
     Result->SetArrayField(TEXT("nodes"), NodesArray);
     Result->SetNumberField(TEXT("node_count"), NodesArray.Num());
     Result->SetArrayField(TEXT("connections"), ConnectionsArray);
     Result->SetNumberField(TEXT("connection_count"), ConnectionsArray.Num());
+    
+    // Get rapid iteration parameters
+    TArray<TSharedPtr<FJsonValue>> ParametersArray;
+    const FNiagaraParameterStore& ParamStore = Script->RapidIterationParameters;
+    TArrayView<const FNiagaraVariableWithOffset> ParamVariables = ParamStore.ReadParameterVariables();
+    
+    for (const FNiagaraVariableWithOffset& ParamWithOffset : ParamVariables)
+    {
+        TSharedPtr<FJsonObject> ParamJson = MakeShareable(new FJsonObject);
+        ParamJson->SetStringField(TEXT("name"), ParamWithOffset.GetName().ToString());
+        ParamJson->SetStringField(TEXT("type"), ParamWithOffset.GetType().GetName());
+        ParametersArray.Add(MakeShareable(new FJsonValueObject(ParamJson)));
+    }
+    
+    Result->SetArrayField(TEXT("parameters"), ParametersArray);
+    Result->SetNumberField(TEXT("parameter_count"), ParametersArray.Num());
     
     return Result;
 }
@@ -2376,143 +2306,39 @@ TArray<TSharedPtr<FJsonValue>> FEpicUnrealMCPNiagaraCommands::GetNodeConnections
 }
 
 // ============================================================================
-// Niagara Script Operations (for any Niagara Script asset)
-// ============================================================================
-// Niagara Script Asset Operations (for standalone Module/Function scripts)
+// Graph Update Operations
 // ============================================================================
 
-TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleGetNiagaraScriptAsset(const TSharedPtr<FJsonObject>& Params)
-{
-    TSharedPtr<FJsonObject> Result = MakeShareable(new FJsonObject);
-    
-    FString ScriptPath;
-    if (!Params->TryGetStringField(TEXT("script_path"), ScriptPath))
-    {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), TEXT("Missing required parameter: script_path"));
-        return Result;
-    }
-    
-    // Load the Niagara Script asset directly
-    UNiagaraScript* Script = LoadObject<UNiagaraScript>(nullptr, *ScriptPath);
-    if (!Script)
-    {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to load Niagara script: %s"), *ScriptPath));
-        return Result;
-    }
-    
-    // Get script metadata
-    Result->SetBoolField(TEXT("success"), true);
-    Result->SetStringField(TEXT("script_path"), ScriptPath);
-    Result->SetStringField(TEXT("script_name"), Script->GetName());
-    
-    // Get script usage
-    FString UsageStr = TEXT("Unknown");
-    switch (Script->GetUsage())
-    {
-        case ENiagaraScriptUsage::Function: UsageStr = TEXT("Function"); break;
-        case ENiagaraScriptUsage::Module: UsageStr = TEXT("Module"); break;
-        case ENiagaraScriptUsage::DynamicInput: UsageStr = TEXT("DynamicInput"); break;
-        case ENiagaraScriptUsage::ParticleSpawnScript: UsageStr = TEXT("ParticleSpawn"); break;
-        case ENiagaraScriptUsage::ParticleUpdateScript: UsageStr = TEXT("ParticleUpdate"); break;
-        case ENiagaraScriptUsage::EmitterSpawnScript: UsageStr = TEXT("EmitterSpawn"); break;
-        case ENiagaraScriptUsage::EmitterUpdateScript: UsageStr = TEXT("EmitterUpdate"); break;
-        case ENiagaraScriptUsage::SystemSpawnScript: UsageStr = TEXT("SystemSpawn"); break;
-        case ENiagaraScriptUsage::SystemUpdateScript: UsageStr = TEXT("SystemUpdate"); break;
-        case ENiagaraScriptUsage::ParticleEventScript: UsageStr = TEXT("ParticleEvent"); break;
-        default: break;
-    }
-    Result->SetStringField(TEXT("usage"), UsageStr);
-    
-    // Get description
-    Result->SetStringField(TEXT("description"), Script->GetDescription(FGuid()).ToString());
-    
-    // Get graph
-    UNiagaraScriptSource* Source = Cast<UNiagaraScriptSource>(Script->GetLatestSource());
-    UNiagaraGraph* Graph = Source ? Source->NodeGraph : nullptr;
-    
-    if (!Graph)
-    {
-        Result->SetBoolField(TEXT("has_graph"), false);
-        return Result;
-    }
-    
-    Result->SetBoolField(TEXT("has_graph"), true);
-    
-    // Build node ID map
-    TMap<UEdGraphNode*, FString> NodeIdMap;
-    int32 NodeIndex = 0;
-    for (UEdGraphNode* NodeBase : Graph->Nodes)
-    {
-        if (NodeBase)
-        {
-            FString NodeId = FString::Printf(TEXT("Node_%d"), NodeIndex++);
-            NodeIdMap.Add(NodeBase, NodeId);
-        }
-    }
-    
-    // Build nodes array
-    TArray<TSharedPtr<FJsonValue>> NodesArray;
-    TArray<TSharedPtr<FJsonValue>> ConnectionsArray;
-    
-    for (UEdGraphNode* NodeBase : Graph->Nodes)
-    {
-        UNiagaraNode* Node = Cast<UNiagaraNode>(NodeBase);
-        if (!Node) continue;
-        
-        // Get node details
-        TSharedPtr<FJsonObject> NodeJson = GetNodeDetails(Node);
-        FString NodeId = NodeIdMap[Node];
-        NodeJson->SetStringField(TEXT("node_id"), NodeId);
-        NodesArray.Add(MakeShareable(new FJsonValueObject(NodeJson)));
-        
-        // Get connections from this node
-        TArray<TSharedPtr<FJsonValue>> NodeConnections = GetNodeConnections(Node, NodeIdMap);
-        for (const auto& Conn : NodeConnections)
-        {
-            ConnectionsArray.Add(Conn);
-        }
-    }
-    
-    Result->SetArrayField(TEXT("nodes"), NodesArray);
-    Result->SetNumberField(TEXT("node_count"), NodesArray.Num());
-    Result->SetArrayField(TEXT("connections"), ConnectionsArray);
-    Result->SetNumberField(TEXT("connection_count"), ConnectionsArray.Num());
-    
-    // Get rapid iteration parameters
-    TArray<TSharedPtr<FJsonValue>> ParametersArray;
-    const FNiagaraParameterStore& ParamStore = Script->RapidIterationParameters;
-    TArrayView<const FNiagaraVariableWithOffset> ParamVariables = ParamStore.ReadParameterVariables();
-    
-    for (const FNiagaraVariableWithOffset& ParamWithOffset : ParamVariables)
-    {
-        TSharedPtr<FJsonObject> ParamJson = MakeShareable(new FJsonObject);
-        ParamJson->SetStringField(TEXT("name"), ParamWithOffset.GetName().ToString());
-        ParamJson->SetStringField(TEXT("type"), ParamWithOffset.GetType().GetName());
-        ParametersArray.Add(MakeShareable(new FJsonValueObject(ParamJson)));
-    }
-    
-    Result->SetArrayField(TEXT("parameters"), ParametersArray);
-    Result->SetNumberField(TEXT("parameter_count"), ParametersArray.Num());
-    
-    return Result;
-}
-
-TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraScriptAsset(const TSharedPtr<FJsonObject>& Params)
+TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraGraph(const TSharedPtr<FJsonObject>& Params)
 {
     TSharedPtr<FJsonObject> Result = MakeShareable(new FJsonObject);
 
-    // This tool operates on standalone Niagara Script assets only
-    // (Module Scripts, Function Scripts, etc.)
-    // For modifying scripts within a Niagara System, use update_niagara_asset
-
+    // Method 1: Direct script path for standalone assets
     FString ScriptPath;
-    if (!Params->TryGetStringField(TEXT("script_path"), ScriptPath))
+    bool bUseStandaloneScript = Params->TryGetStringField(TEXT("script_path"), ScriptPath);
+
+    // Method 2: Locate script within System's Emitter
+    FString AssetPath;
+    FString EmitterName;
+    FString ScriptType = TEXT("spawn");
+
+    if (!bUseStandaloneScript)
     {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), TEXT("Missing required parameter: script_path"));
-        return Result;
+        if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath))
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), TEXT("Must provide either (asset_path + emitter) or script_path"));
+            return Result;
+        }
+
+        if (!Params->TryGetStringField(TEXT("emitter"), EmitterName))
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), TEXT("Must provide either (asset_path + emitter) or script_path"));
+            return Result;
+        }
+
+        Params->TryGetStringField(TEXT("script"), ScriptType);
     }
 
     const TArray<TSharedPtr<FJsonValue>>* OperationsArray;
@@ -2523,16 +2349,67 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraScript
         return Result;
     }
 
-    // Load the standalone script asset
-    UNiagaraScript* Script = LoadObject<UNiagaraScript>(nullptr, *ScriptPath);
-    if (!Script)
+    // Get the script
+    UNiagaraScript* Script = nullptr;
+    UNiagaraSystem* NiagaraSystem = nullptr;
+    
+    if (bUseStandaloneScript)
     {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to load Niagara script: %s"), *ScriptPath));
-        return Result;
+        Script = LoadObject<UNiagaraScript>(nullptr, *ScriptPath);
+        if (!Script)
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to load Niagara script: %s"), *ScriptPath));
+            return Result;
+        }
+        Result->SetStringField(TEXT("script_path"), ScriptPath);
     }
+    else
+    {
+        NiagaraSystem = LoadNiagaraSystemAsset(AssetPath);
+        if (!NiagaraSystem)
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to load Niagara system: %s"), *AssetPath));
+            return Result;
+        }
 
-    Result->SetStringField(TEXT("script_path"), ScriptPath);
+        FNiagaraEmitterHandle* Handle = FindEmitterHandle(NiagaraSystem, EmitterName);
+        if (!Handle)
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Emitter not found: %s"), *EmitterName));
+            return Result;
+        }
+
+        FVersionedNiagaraEmitterData* EmitterData = Handle->GetEmitterData();
+        if (!EmitterData)
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), TEXT("Failed to get emitter data"));
+            return Result;
+        }
+
+        if (ScriptType.ToLower() == TEXT("spawn"))
+        {
+            Script = EmitterData->SpawnScriptProps.Script;
+        }
+        else if (ScriptType.ToLower() == TEXT("update"))
+        {
+            Script = EmitterData->UpdateScriptProps.Script;
+        }
+
+        if (!Script)
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Script not found: %s"), *ScriptType));
+            return Result;
+        }
+
+        Result->SetStringField(TEXT("asset_path"), AssetPath);
+        Result->SetStringField(TEXT("emitter_name"), EmitterName);
+        Result->SetStringField(TEXT("script_type"), ScriptType);
+    }
 
     // Get graph source
     UNiagaraScriptSource* Source = Cast<UNiagaraScriptSource>(Script->GetLatestSource());
@@ -2542,7 +2419,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraScript
         Result->SetStringField(TEXT("error"), TEXT("Failed to get script source"));
         return Result;
     }
-    
+
     UNiagaraGraph* Graph = Source->NodeGraph;
     if (!Graph)
     {
@@ -2550,22 +2427,21 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraScript
         Result->SetStringField(TEXT("error"), TEXT("Failed to get Niagara graph"));
         return Result;
     }
-    
+
     TArray<TSharedPtr<FJsonValue>> ResultsArray;
     int32 SuccessCount = 0;
     int32 FailCount = 0;
-    
+
     for (const TSharedPtr<FJsonValue>& OpValue : *OperationsArray)
     {
         TSharedPtr<FJsonObject> Op = OpValue->AsObject();
         if (!Op.IsValid()) continue;
-        
+
         FString Action = Op->GetStringField(TEXT("action"));
         TSharedPtr<FJsonObject> OpResult = MakeShareable(new FJsonObject);
-        
+
         if (Action == TEXT("add_module"))
         {
-            // Add module to script
             FString ModulePath;
             if (!Op->TryGetStringField(TEXT("module_path"), ModulePath))
             {
@@ -2575,7 +2451,6 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraScript
             }
             else
             {
-                // Load module script
                 UNiagaraScript* ModuleScript = LoadObject<UNiagaraScript>(nullptr, *ModulePath);
                 if (!ModuleScript)
                 {
@@ -2585,8 +2460,6 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraScript
                 }
                 else
                 {
-                    // Find output node by iterating through graph nodes
-                    // Note: FindOutputNode and FindOutputNodes are not exported
                     ENiagaraScriptUsage ScriptUsage = Script->GetUsage();
                     UNiagaraNodeOutput* OutputNode = nullptr;
 
@@ -2608,17 +2481,12 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraScript
                     }
                     else
                     {
-                        // Use UNiagaraScript* version of AddScriptModuleToStack (exported with NIAGARAEDITOR_API)
-                        // Signature: NIAGARAEDITOR_API UNiagaraNodeFunctionCall* AddScriptModuleToStack(
-                        //     UNiagaraScript* ModuleScript, UNiagaraNodeOutput& TargetOutputNode,
-                        //     int32 TargetIndex = INDEX_NONE, FString SuggestedName = FString(),
-                        //     const FGuid& VersionGuid = FGuid())
                         UNiagaraNodeFunctionCall* NewModule = FNiagaraStackGraphUtilities::AddScriptModuleToStack(
                             ModuleScript,
                             *OutputNode,
-                            INDEX_NONE,      // TargetIndex - add to end
-                            FString(),       // SuggestedName - empty for default
-                            FGuid()          // VersionGuid - empty for default
+                            INDEX_NONE,
+                            FString(),
+                            FGuid()
                         );
 
                         if (NewModule)
@@ -2628,8 +2496,6 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraScript
                             OpResult->SetStringField(TEXT("module_path"), ModulePath);
                             OpResult->SetStringField(TEXT("module_name"), NewModule->GetName());
                             SuccessCount++;
-
-                            // Mark as modified
                             Script->Modify();
                         }
                         else
@@ -2644,8 +2510,6 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraScript
         }
         else if (Action == TEXT("remove_module"))
         {
-            // Remove module from script by directly removing the node from the graph
-            // Note: RemoveModuleFromStack is not exported, so we use simple node removal
             FString ModuleName;
             if (Op->TryGetStringField(TEXT("module_name"), ModuleName))
             {
@@ -2655,11 +2519,9 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraScript
                     UNiagaraNodeFunctionCall* FuncNode = Cast<UNiagaraNodeFunctionCall>(NodeBase);
                     if (FuncNode && FuncNode->GetName().Contains(ModuleName))
                     {
-                        // Mark script as modified before removing
                         Script->Modify();
                         FuncNode->Modify();
 
-                        // Break all connections first
                         for (UEdGraphPin* Pin : FuncNode->Pins)
                         {
                             if (Pin)
@@ -2668,7 +2530,6 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraScript
                             }
                         }
 
-                        // Remove node from graph
                         Graph->RemoveNode(FuncNode);
 
                         OpResult->SetBoolField(TEXT("success"), true);
@@ -2696,7 +2557,6 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraScript
         }
         else if (Action == TEXT("set_parameter"))
         {
-            // Set parameter value in rapid iteration parameters
             FString ParamName;
             if (!Op->TryGetStringField(TEXT("name"), ParamName))
             {
@@ -2706,11 +2566,9 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraScript
             }
             else
             {
-                // Get parameter value
                 TSharedPtr<FJsonValue> ValueJson = Op->TryGetField(TEXT("value"));
                 if (ValueJson.IsValid())
                 {
-                    // Try to set as float first
                     float FloatValue;
                     if (ValueJson->TryGetNumber(FloatValue))
                     {
@@ -2718,7 +2576,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraScript
                         Var.SetValue(FloatValue);
                         bool bAddIfMissing = true;
                         Script->RapidIterationParameters.SetParameterData(Var.GetData(), Var, bAddIfMissing);
-                        
+
                         OpResult->SetBoolField(TEXT("success"), true);
                         OpResult->SetStringField(TEXT("action"), TEXT("set_parameter"));
                         OpResult->SetStringField(TEXT("name"), ParamName);
@@ -2746,17 +2604,24 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraScript
             OpResult->SetStringField(TEXT("error"), FString::Printf(TEXT("Unknown action: %s"), *Action));
             FailCount++;
         }
-        
+
         ResultsArray.Add(MakeShareable(new FJsonValueObject(OpResult)));
     }
 
-    // Mark script package dirty
-    Script->MarkPackageDirty();
+    // Mark dirty
+    if (NiagaraSystem)
+    {
+        NiagaraSystem->MarkPackageDirty();
+    }
+    else
+    {
+        Script->MarkPackageDirty();
+    }
 
     Result->SetBoolField(TEXT("success"), FailCount == 0);
     Result->SetArrayField(TEXT("results"), ResultsArray);
     Result->SetNumberField(TEXT("success_count"), SuccessCount);
     Result->SetNumberField(TEXT("fail_count"), FailCount);
-    
+
     return Result;
 }

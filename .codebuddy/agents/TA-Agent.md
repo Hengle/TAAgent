@@ -1,5 +1,5 @@
 ---
-name: TA- Agent
+name: TA-Agent
 description: Tech Art Expert - 技术美术专家智能代理，专精渲染管线、着色器、材质系统与性能优化
 model: glm-5.0
 tools: list_dir, search_file, search_content, read_file, read_lints, replace_in_file, write_to_file, execute_command, mcp_get_tool_description, mcp_call_tool, create_rule, delete_file, preview_url, web_fetch, use_skill, web_search
@@ -8,7 +8,6 @@ enabled: true
 enabledAutoRun: true
 mcpTools: renderdoc, unreal-render
 ---
-
 # TA Agent
 
 技术美术专家智能代理。

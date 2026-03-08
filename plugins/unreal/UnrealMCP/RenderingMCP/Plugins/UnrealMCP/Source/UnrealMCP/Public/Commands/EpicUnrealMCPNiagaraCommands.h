@@ -22,16 +22,18 @@ struct FVersionedNiagaraEmitterData;
 /**
  * Handler class for Niagara-related MCP commands.
  * 
- * Design Note: Only provides tools that generic tools cannot handle.
- * - get_niagara_asset_details: Deep inspection of complex nested Niagara structure
- * - update_niagara_asset: Batch modification of emitters, renderers, parameters, etc.
+ * Design Philosophy: 4 tools following "Minimal Tool Set" principle.
+ * 
+ * Graph Form Tools:
+ * - get_niagara_graph: Read Niagara script graphs (embedded or standalone)
+ * - update_niagara_graph: Update Niagara script graphs
+ * 
+ * Emitter Form Tools:
+ * - get_niagara_emitter: Read Emitter hierarchy and properties
+ * - update_niagara_emitter: Batch update Emitter structure
  * 
  * For listing assets: use get_assets(asset_class="NiagaraSystem")
  * For creating/deleting: use generic create_asset/delete_asset
- * 
- * This follows the MCP design philosophy:
- * - Generic tools for common operations
- * - Domain-specific tools only for complex nested data
  */
 class UNREALMCP_API FEpicUnrealMCPNiagaraCommands
 {
@@ -42,92 +44,63 @@ public:
 
 private:
     // ============================================================================
-    // Read Operations
+    // Graph Form Tools - Read/Update Niagara Script Graphs
     // ============================================================================
     
     /**
-     * Get detailed information about a Niagara asset.
-     * Supports selective data retrieval via detail_level and include parameters.
+     * Get Niagara Graph nodes and connections.
+     * 
+     * Unified interface for reading graphs from:
+     * 1. Scripts within a Niagara System (specify asset_path + emitter + script)
+     * 2. Standalone Niagara Script assets (specify script_path only)
      */
-    TSharedPtr<FJsonObject> HandleGetNiagaraAssetDetails(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleGetNiagaraGraph(const TSharedPtr<FJsonObject>& Params);
+    
+    /**
+     * Update Niagara Graph with operations.
+     * 
+     * Operations: add_module, remove_module, set_parameter, connect, disconnect
+     */
+    TSharedPtr<FJsonObject> HandleUpdateNiagaraGraph(const TSharedPtr<FJsonObject>& Params);
     
     // ============================================================================
-    // Update Operations
+    // Emitter Form Tools - Read/Update Emitter Hierarchy
     // ============================================================================
     
     /**
-     * Batch update a Niagara asset with multiple operations.
+     * Get Niagara Emitter structure and properties.
      * 
-     * Operations format:
-     * [
-     *   {"target": "emitter", "name": "Flame", "action": "set_enabled", "value": false},
-     *   {"target": "emitter", "name": "Flame", "action": "rename", "value": "BigFlame"},
-     *   {"target": "renderer", "emitter": "Flame", "index": 0, "action": "set_enabled", "value": true},
-     *   {"target": "parameter", "emitter": "Flame", "script": "spawn", "name": "SpawnRate", "value": 100.0},
-     *   {"target": "sim_stage", "emitter": "Flame", "name": "Collision", "action": "set_enabled", "value": true},
-     *   {"target": "emitter", "name": "Smoke", "action": "add", "template": "/Niagara/Templates/SimpleSmoke"},
-     *   {"target": "emitter", "name": "OldEmitter", "action": "remove"}
-     * ]
+     * Supports:
+     * - detail_level: "overview" or "full"
+     * - include: scripts, renderers, parameters, stateless_analysis
      */
-    TSharedPtr<FJsonObject> HandleUpdateNiagaraAsset(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleGetNiagaraEmitter(const TSharedPtr<FJsonObject>& Params);
     
     /**
-     * Analyze Standard emitter compatibility for Stateless conversion.
+     * Batch update Niagara Emitter with multiple operations.
      * 
-     * Checks if all modules in a Standard emitter have Stateless equivalents.
-     * Returns conversion suggestions and compatibility report.
-     */
-    TSharedPtr<FJsonObject> HandleAnalyzeStatelessCompatibility(const TSharedPtr<FJsonObject>& Params);
-    
-    /**
-     * Convert Standard emitter to Stateless mode.
-     * 
-     * Automatically converts compatible Standard emitter to Stateless,
-     * migrating module parameters where possible.
-     */
-    TSharedPtr<FJsonObject> HandleConvertToStateless(const TSharedPtr<FJsonObject>& Params);
-    
-    /**
-     * Get Niagara Module Graph nodes and connections.
-     * Similar to get_material_graph for materials.
-     * 
-     * Returns all nodes in the graph with their:
-     * - Node type and properties
-     * - Input/Output pins
-     * - Connections between nodes
-     */
-    TSharedPtr<FJsonObject> HandleGetNiagaraModuleGraph(const TSharedPtr<FJsonObject>& Params);
-    
-    /**
-     * Get Niagara Script Asset - read standalone Niagara Script assets.
-     * For Module Scripts, Function Scripts, etc.
-     *
-     * Note: This is for standalone script assets, NOT scripts within a Niagara System.
-     * For scripts within a System, use get_niagara_asset_details.
-     *
-     * Parameters:
-     * - script_path: Full path to the Niagara Script (e.g. "/Niagara/Modules/Update/Forces/CurlNoiseForce.CurlNoiseForce")
-     *
-     * Returns script metadata and graph structure.
-     */
-    TSharedPtr<FJsonObject> HandleGetNiagaraScriptAsset(const TSharedPtr<FJsonObject>& Params);
-
-    /**
-     * Update Niagara Script Asset - modify standalone Niagara Script assets.
-     * For Module Scripts, Function Scripts, etc.
-     *
-     * Note: This is for standalone script assets, NOT scripts within a Niagara System.
-     * For modifying scripts within a System, use update_niagara_asset.
-     *
      * Operations:
-     * - add_module: Add a module to the script
-     * - remove_module: Remove a module from the script
-     * - set_parameter: Set a parameter value
+     * - emitter: set_enabled, rename, add, remove, convert_to_stateless
+     * - renderer: set_enabled
+     * - parameter: set value
+     * - sim_stage: set_enabled
+     * - stateless_module: set_property
      */
-    TSharedPtr<FJsonObject> HandleUpdateNiagaraScriptAsset(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleUpdateNiagaraEmitter(const TSharedPtr<FJsonObject>& Params);
     
     // ============================================================================
-    // Helper Functions - Read
+    // Helper Functions - Graph
+    // ============================================================================
+    
+    // Core graph extraction (shared between embedded and standalone scripts)
+    TSharedPtr<FJsonObject> ExtractGraphFromScript(UNiagaraScript* Script, const FString& ModuleFilter = TEXT(""));
+    
+    // Graph node helpers
+    TSharedPtr<FJsonObject> GetNodeDetails(class UNiagaraNode* Node);
+    TArray<TSharedPtr<FJsonValue>> GetNodeConnections(class UNiagaraNode* Node, const TMap<class UEdGraphNode*, FString>& NodeIdMap);
+    
+    // ============================================================================
+    // Helper Functions - Emitter
     // ============================================================================
     
     TSharedPtr<FJsonObject> GetNiagaraSystemOverview(UNiagaraSystem* System);
@@ -137,9 +110,8 @@ private:
     TSharedPtr<FJsonObject> GetRendererDetails(UNiagaraRendererProperties* Renderer);
     TSharedPtr<FJsonObject> GetSimulationStageDetails(UNiagaraSimulationStageBase* Stage);
     
-    // Graph node helpers
-    TSharedPtr<FJsonObject> GetNodeDetails(class UNiagaraNode* Node);
-    TArray<TSharedPtr<FJsonValue>> GetNodeConnections(class UNiagaraNode* Node, const TMap<class UEdGraphNode*, FString>& NodeIdMap);
+    // Stateless analysis helper
+    TSharedPtr<FJsonObject> AnalyzeStatelessCompatibility(FNiagaraEmitterHandle& Handle);
     
     // ============================================================================
     // Helper Functions - Update

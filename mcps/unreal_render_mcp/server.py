@@ -16,7 +16,6 @@ from tools import (
     build_material_graph,
     compile_material,
     get_material_graph,
-    get_material_function_content,
     # Texture
     import_texture,
     set_texture_properties,
@@ -90,7 +89,6 @@ mcp = FastMCP(
 mcp.tool()(build_material_graph)
 mcp.tool()(compile_material)
 mcp.tool()(get_material_graph)
-mcp.tool()(get_material_function_content)
 
 
 # ============================================================================
@@ -140,13 +138,10 @@ mcp.tool()(batch_set_assets_properties)
 # Register Niagara Tools
 # ============================================================================
 
-mcp.tool()(get_niagara_asset_details)
-mcp.tool()(update_niagara_asset)
-mcp.tool()(analyze_stateless_compatibility)
-mcp.tool()(convert_to_stateless)
-mcp.tool()(get_niagara_module_graph)
-mcp.tool()(get_niagara_script_asset)
-mcp.tool()(update_niagara_script_asset)
+mcp.tool()(get_niagara_graph)
+mcp.tool()(update_niagara_graph)
+mcp.tool()(get_niagara_emitter)
+mcp.tool()(update_niagara_emitter)
 
 
 # ============================================================================

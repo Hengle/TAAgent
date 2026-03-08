@@ -53,37 +53,38 @@ def compile_material(material_name: str) -> Dict[str, Any]:
 
 
 @with_unreal_connection
-def get_material_graph(material_name: str, save_to: Optional[str] = None) -> Dict[str, Any]:
+def get_material_graph(asset_path: str, save_to: Optional[str] = None) -> Dict[str, Any]:
     """
-    Get complete material graph including nodes and connections.
+    Get complete material or material function graph including nodes and connections.
+    
+    Supports both Material and MaterialFunction assets. Automatically detects the asset type.
     
     Args:
-        material_name: Name or path of the material
+        asset_path: Path to the material or material function (e.g., "/Game/Materials/M_MyMaterial")
         save_to: Optional path to save JSON
+    
+    Returns:
+        {
+            "asset_type": "Material" | "MaterialFunction",
+            "name": "...",
+            "path": "...",
+            "nodes": [...],
+            "connections": [...],
+            "node_count": N,
+            "connection_count": M,
+            # For Material only:
+            "property_connections": {"BaseColor": {...}, "Normal": {...}, ...},
+            # For MaterialFunction only:
+            "inputs": [...],
+            "outputs": [...],
+            "description": "..."
+        }
     """
-    result = send_command("get_material_graph", {"material_name": material_name})
+    result = send_command("get_material_graph", {"asset_path": asset_path})
     
     if save_to and result.get("success"):
-        save_info = save_json_to_file(result, save_to, "material_graph", material_name)
-        result.update(save_info)
-    
-    return result
-
-
-@with_unreal_connection
-def get_material_function_content(function_path: str, save_to: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Get detailed content of a Material Function.
-    
-    Args:
-        function_path: Full path to the Material Function
-        save_to: Optional path to save JSON
-    """
-    result = send_command("get_material_function_content", {"function_path": function_path})
-    
-    if save_to and result.get("success"):
-        func_name = function_path.split("/")[-1].split(".")[0]
-        save_info = save_json_to_file(result, save_to, "material_function", func_name)
+        asset_name = result.get("name", asset_path.split("/")[-1])
+        save_info = save_json_to_file(result, save_to, "material_graph", asset_name)
         result.update(save_info)
     
     return result

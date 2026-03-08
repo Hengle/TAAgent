@@ -1,7 +1,12 @@
 """
 Niagara Tools for Unreal Render MCP
 
-Niagara system analysis and modification tools.
+Consolidated Niagara system analysis and modification tools.
+
+Design Philosophy:
+- 4 tools following "Minimal Tool Set" principle
+- Graph form: get/update Niagara script graphs
+- Emitter form: get/update Emitter hierarchy structure
 """
 
 from typing import Dict, Any, List, Optional
@@ -15,8 +20,147 @@ from common import send_command, save_json_to_file, with_unreal_connection
 logger = logging.getLogger("UnrealRenderMCP")
 
 
+# ============================================================================
+# Graph Form Tools - Read/Update Niagara Script Graphs
+# ============================================================================
+
 @with_unreal_connection
-def get_niagara_asset_details(
+def get_niagara_graph(
+    # Method 1: Locate script within System's Emitter
+    asset_path: Optional[str] = None,
+    emitter: Optional[str] = None,
+    script: str = "spawn",
+    
+    # Method 2: Direct script path for standalone assets
+    script_path: Optional[str] = None,
+    
+    # Optional filter
+    module: str = "",
+    save_to: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Get Niagara Graph nodes and connections.
+    
+    Unified interface for reading graphs from:
+    1. Scripts within a Niagara System (specify asset_path + emitter + script)
+    2. Standalone Niagara Script assets (specify script_path only)
+    
+    Args:
+        asset_path: Path to Niagara System asset (for embedded scripts)
+        emitter: Emitter name within the system
+        script: Script type - "spawn" or "update" (default: "spawn")
+        script_path: Direct path to standalone Niagara Script asset
+        module: Optional filter - only return nodes matching this module name
+        save_to: Optional path to save JSON
+        
+    Examples:
+        # Get graph from System's Emitter spawn script
+        get_niagara_graph(asset_path="/Game/Effects/NS_Fire", emitter="Flame", script="spawn")
+        
+        # Get graph from standalone Niagara Module
+        get_niagara_graph(script_path="/Niagara/Modules/Update/Forces/CurlNoiseForce")
+    """
+    params = {
+        "script": script,
+        "module": module
+    }
+    
+    # Determine location method
+    if script_path:
+        params["script_path"] = script_path
+    elif asset_path and emitter:
+        params["asset_path"] = asset_path
+        params["emitter"] = emitter
+    else:
+        return {
+            "success": False,
+            "error": "Must provide either (asset_path + emitter) or script_path"
+        }
+    
+    result = send_command("get_niagara_graph", params)
+    
+    if save_to and result.get("success"):
+        graph_name = script_path.split("/")[-1] if script_path else f"{emitter}_{script}"
+        save_info = save_json_to_file(result, save_to, "niagara_graph", graph_name)
+        result.update(save_info)
+    
+    return result
+
+
+@with_unreal_connection
+def update_niagara_graph(
+    # Method 1: Locate script within System's Emitter
+    asset_path: Optional[str] = None,
+    emitter: Optional[str] = None,
+    script: str = "spawn",
+    
+    # Method 2: Direct script path for standalone assets
+    script_path: Optional[str] = None,
+    
+    operations: List[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Update Niagara Graph with operations.
+    
+    Unified interface for updating graphs in:
+    1. Scripts within a Niagara System (specify asset_path + emitter + script)
+    2. Standalone Niagara Script assets (specify script_path only)
+    
+    Operations:
+    - add_module: Add a module to the script
+    - remove_module: Remove a module from the script
+    - set_parameter: Set a parameter value
+    - connect: Connect two nodes
+    - disconnect: Disconnect nodes
+    
+    Args:
+        asset_path: Path to Niagara System asset (for embedded scripts)
+        emitter: Emitter name within the system
+        script: Script type - "spawn" or "update"
+        script_path: Direct path to standalone Niagara Script asset
+        operations: List of operations to perform
+        
+    Examples:
+        # Add module to System's Emitter script
+        update_niagara_graph(
+            asset_path="/Game/Effects/NS_Fire",
+            emitter="Flame",
+            script="update",
+            operations=[{"action": "add_module", "module_path": "/Niagara/Modules/Update/Forces/CurlNoiseForce"}]
+        )
+        
+        # Add module to standalone script
+        update_niagara_graph(
+            script_path="/Game/Niagara/MyCustomModule",
+            operations=[{"action": "add_module", "module_path": "/Niagara/Modules/Common/Math"}]
+        )
+    """
+    params = {
+        "script": script,
+        "operations": operations or []
+    }
+    
+    # Determine location method
+    if script_path:
+        params["script_path"] = script_path
+    elif asset_path and emitter:
+        params["asset_path"] = asset_path
+        params["emitter"] = emitter
+    else:
+        return {
+            "success": False,
+            "error": "Must provide either (asset_path + emitter) or script_path"
+        }
+    
+    return send_command("update_niagara_graph", params)
+
+
+# ============================================================================
+# Emitter Form Tools - Read/Update Emitter Hierarchy
+# ============================================================================
+
+@with_unreal_connection
+def get_niagara_emitter(
     asset_path: str,
     detail_level: str = "overview",
     emitters: List[str] = None,
@@ -24,14 +168,30 @@ def get_niagara_asset_details(
     save_to: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Get detailed information about a Niagara system asset.
+    Get Niagara Emitter structure and properties.
     
     Args:
         asset_path: Path to the Niagara system asset
         detail_level: Level of detail - "overview" or "full"
         emitters: Optional list of emitter names to filter
-        include: Optional list of sections to include
+        include: Optional list of sections to include:
+            - "scripts": Spawn/Update script details
+            - "renderers": Renderer configurations
+            - "parameters": Parameter definitions
+            - "stateless_analysis": Analyze Stateless conversion compatibility
         save_to: Optional path to save JSON
+        
+    Examples:
+        # Quick overview of all emitters
+        get_niagara_emitter("/Game/Effects/NS_Fire")
+        
+        # Full detail for specific emitter with stateless analysis
+        get_niagara_emitter(
+            "/Game/Effects/NS_Fire",
+            detail_level="full",
+            emitters=["Flame"],
+            include=["scripts", "renderers", "parameters", "stateless_analysis"]
+        )
     """
     params = {
         "asset_path": asset_path,
@@ -42,143 +202,66 @@ def get_niagara_asset_details(
     if include is not None:
         params["include"] = include
     
-    result = send_command("get_niagara_asset_details", params)
+    result = send_command("get_niagara_emitter", params)
     
     if save_to and result.get("success"):
         asset_name = result.get("asset_name", asset_path.split("/")[-1])
-        save_info = save_json_to_file(result, save_to, "niagara_asset", asset_name)
+        save_info = save_json_to_file(result, save_to, "niagara_emitter", asset_name)
         result.update(save_info)
     
     return result
 
 
 @with_unreal_connection
-def update_niagara_asset(
+def update_niagara_emitter(
     asset_path: str,
     operations: List[Dict[str, Any]]
 ) -> Dict[str, Any]:
     """
-    Batch update a Niagara system asset with multiple operations.
+    Batch update Niagara Emitter with multiple operations.
+    
+    Operations format:
+    [
+        # Emitter operations
+        {"target": "emitter", "name": "Smoke", "action": "set_enabled", "value": false},
+        {"target": "emitter", "name": "Flame", "action": "rename", "value": "BigFlame"},
+        {"target": "emitter", "name": "Smoke", "action": "add", "template": "/Niagara/Templates/SimpleSmoke"},
+        {"target": "emitter", "name": "OldEmitter", "action": "remove"},
+        
+        # Stateless conversion (UE 5.7+)
+        {"target": "emitter", "name": "Flame", "action": "convert_to_stateless", "force": false},
+        
+        # Renderer operations
+        {"target": "renderer", "emitter": "Flame", "index": 0, "action": "set_enabled", "value": true},
+        
+        # Parameter operations
+        {"target": "parameter", "emitter": "Flame", "script": "spawn", "name": "SpawnRate", "value": 100.0},
+        
+        # Simulation stage operations
+        {"target": "sim_stage", "emitter": "Flame", "name": "Collision", "action": "set_enabled", "value": true},
+        
+        # Stateless module operations (UE 5.7+)
+        {"target": "stateless_module", "emitter": "Flame", "name": "Lifetime", 
+         "action": "set_property", "property": "LifetimeMin", "value": 1.5}
+    ]
     
     Args:
         asset_path: Path to the Niagara system asset
         operations: List of operations to perform
+        
+    Examples:
+        # Enable emitter and adjust spawn rate
+        update_niagara_emitter("/Game/Effects/NS_Fire", [
+            {"target": "emitter", "name": "Flame", "action": "set_enabled", "value": True},
+            {"target": "parameter", "emitter": "Flame", "script": "spawn", "name": "SpawnRate", "value": 100.0}
+        ])
+        
+        # Convert emitter to Stateless mode
+        update_niagara_emitter("/Game/Effects/NS_Fire", [
+            {"target": "emitter", "name": "Flame", "action": "convert_to_stateless", "force": False}
+        ])
     """
-    return send_command("update_niagara_asset", {
+    return send_command("update_niagara_emitter", {
         "asset_path": asset_path,
         "operations": operations
-    })
-
-
-@with_unreal_connection
-def analyze_stateless_compatibility(
-    asset_path: str,
-    emitter: str
-) -> Dict[str, Any]:
-    """
-    Analyze if a Standard Niagara emitter can be converted to Stateless mode.
-    
-    Args:
-        asset_path: Path to the Niagara system asset
-        emitter: Name of the emitter to analyze
-    """
-    return send_command("analyze_stateless_compatibility", {
-        "asset_path": asset_path,
-        "emitter": emitter
-    })
-
-
-@with_unreal_connection
-def convert_to_stateless(
-    asset_path: str,
-    emitter: str,
-    force: bool = False
-) -> Dict[str, Any]:
-    """
-    Convert a Standard Niagara emitter to Stateless mode.
-    
-    Args:
-        asset_path: Path to the Niagara system asset
-        emitter: Name of the emitter to convert
-        force: If True, attempt conversion even with warnings
-    """
-    return send_command("convert_to_stateless", {
-        "asset_path": asset_path,
-        "emitter": emitter,
-        "force": force
-    })
-
-
-@with_unreal_connection
-def get_niagara_module_graph(
-    asset_path: str,
-    emitter: str,
-    script: str = "spawn",
-    module: str = "",
-    save_to: Optional[str] = None
-) -> Dict[str, Any]:
-    """
-    Get Niagara Module Graph nodes and connections.
-    
-    Args:
-        asset_path: Path to the Niagara system asset
-        emitter: Name of the emitter to inspect
-        script: Script type - "spawn" or "update"
-        module: Optional filter - only return nodes matching this module name
-        save_to: Optional path to save JSON
-    """
-    params = {
-        "asset_path": asset_path,
-        "emitter": emitter,
-        "script": script,
-        "module": module
-    }
-    
-    result = send_command("get_niagara_module_graph", params)
-    
-    if save_to and result.get("success"):
-        graph_name = f"{emitter}_{script}"
-        save_info = save_json_to_file(result, save_to, "niagara_graph", graph_name)
-        result.update(save_info)
-    
-    return result
-
-
-@with_unreal_connection
-def get_niagara_script_asset(
-    script_path: str,
-    save_to: Optional[str] = None
-) -> Dict[str, Any]:
-    """
-    Get Niagara Script Asset details for standalone script assets.
-    
-    Args:
-        script_path: Full path to the standalone Niagara Script asset
-        save_to: Optional path to save JSON
-    """
-    result = send_command("get_niagara_script_asset", {"script_path": script_path})
-    
-    if save_to and result.get("success"):
-        asset_name = result.get("script_name", script_path.split("/")[-1])
-        save_info = save_json_to_file(result, save_to, "niagara_script", asset_name)
-        result.update(save_info)
-    
-    return result
-
-
-@with_unreal_connection
-def update_niagara_script_asset(
-    script_path: str,
-    operations: List[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    """
-    Update a standalone Niagara Script Asset.
-    
-    Args:
-        script_path: Full path to a standalone Niagara Script asset
-        operations: List of operations to perform
-    """
-    return send_command("update_niagara_script_asset", {
-        "script_path": script_path,
-        "operations": operations or []
     })

@@ -22,9 +22,9 @@ get_assets(asset_class="NiagaraSystem")  # List any asset type
 |----------|-------|-------|
 | Generic Asset | 7 | create/delete/set/get/batch_create/batch_set/get_assets |
 | Generic Actor | 8 | spawn/delete/set/get/batch_spawn/batch_delete/batch_set/get_actors |
-| Material | 4 | build_material_graph, compile_material, get_material_graph, get_material_function_content |
+| Material | 3 | build_material_graph, compile_material, get_material_graph |
 | Import | 2 | import_texture, import_fbx |
-| Niagara | 5 | get_niagara_asset_details, update_niagara_asset, analyze_stateless_compatibility, convert_to_stateless, get_niagara_module_graph |
+| Niagara | 4 | get_niagara_graph, update_niagara_graph, get_niagara_emitter, update_niagara_emitter |
 
 ---
 
@@ -96,7 +96,7 @@ batch_spawn_actors([
 
 ---
 
-## Material Graph Tools (4 tools)
+## Material Graph Tools (3 tools)
 
 ### `build_material_graph` (Recommended)
 
@@ -126,19 +126,28 @@ build_material_graph(
 
 ### `get_material_graph`
 
-Get complete material graph (nodes + connections).
+Get complete material or material function graph (nodes + connections). Supports both Material and MaterialFunction assets.
 
 ```python
-get_material_graph("/Game/Materials/M_Material")
-# Returns: {"nodes": [...], "connections": [...], "property_connections": {...}}
-```
+# For Material
+result = get_material_graph("/Game/Materials/M_Material")
+# Returns: {
+#   "asset_type": "Material",
+#   "nodes": [...],
+#   "connections": [...],
+#   "property_connections": {"BaseColor": {...}, "Normal": {...}, ...}
+# }
 
-### `get_material_function_content`
-
-Get material function details with internal node connections.
-
-```python
-get_material_function_content("/Engine/Functions/Engine_MaterialFunctions01/Texturing/BitMask")
+# For MaterialFunction
+result = get_material_graph("/Engine/Functions/Engine_MaterialFunctions01/Texturing/BitMask")
+# Returns: {
+#   "asset_type": "MaterialFunction",
+#   "nodes": [...],
+#   "connections": [...],
+#   "inputs": [...],
+#   "outputs": [...],
+#   "description": "..."
+# }
 ```
 
 ### `compile_material`
@@ -151,74 +160,83 @@ compile_material("/Game/Materials/M_MyMaterial")
 
 ---
 
-## Niagara Asset Tools (5 tools)
+## Niagara Tools (4 tools)
 
-### `get_niagara_asset_details`
+Following "Minimal Tool Set" principle:
+- **Graph Form**: Read/update Niagara script graphs (embedded or standalone)
+- **Emitter Form**: Read/update Emitter hierarchy structure
 
-Get Niagara system details with selective data retrieval.
+### `get_niagara_graph`
+
+Get Niagara Graph nodes and connections. Unified interface for reading graphs from:
+1. Scripts within a Niagara System (specify asset_path + emitter + script)
+2. Standalone Niagara Script assets (specify script_path only)
 
 ```python
-# Quick overview
-get_niagara_asset_details("/Game/Effects/NS_Fire")
+# Get graph from System's Emitter spawn script
+get_niagara_graph(asset_path="/Game/Effects/NS_Fire", emitter="Flame", script="spawn")
 
-# Full detail for specific emitter
-get_niagara_asset_details(
-    "/Game/Effects/NS_Fire",
-    detail_level="full",
-    emitters=["Flame"],
-    include=["scripts", "renderers", "parameters"]
+# Get graph from standalone Niagara Module
+get_niagara_graph(script_path="/Niagara/Modules/Update/Forces/CurlNoiseForce")
+```
+
+### `update_niagara_graph`
+
+Update Niagara Graph with operations.
+
+```python
+# Add module to System's Emitter script
+update_niagara_graph(
+    asset_path="/Game/Effects/NS_Fire",
+    emitter="Flame",
+    script="update",
+    operations=[{"action": "add_module", "module_path": "/Niagara/Modules/Update/Forces/CurlNoiseForce"}]
+)
+
+# Add module to standalone script
+update_niagara_graph(
+    script_path="/Game/Niagara/MyCustomModule",
+    operations=[{"action": "add_module", "module_path": "/Niagara/Modules/Common/Math"}]
 )
 ```
 
-### `update_niagara_asset`
+### `get_niagara_emitter`
 
-Batch modification tool for Niagara systems.
+Get Niagara Emitter structure and properties.
+
+```python
+# Quick overview of all emitters
+get_niagara_emitter("/Game/Effects/NS_Fire")
+
+# Full detail with stateless analysis
+get_niagara_emitter(
+    "/Game/Effects/NS_Fire",
+    detail_level="full",
+    emitters=["Flame"],
+    include=["scripts", "renderers", "parameters", "stateless_analysis"]
+)
+```
+
+### `update_niagara_emitter`
+
+Batch update Niagara Emitter with multiple operations.
 
 ```python
 # Emitter operations
-update_niagara_asset("/Game/Effects/NS_Fire", [
+update_niagara_emitter("/Game/Effects/NS_Fire", [
     {"target": "emitter", "name": "Smoke", "action": "set_enabled", "value": False},
-    {"target": "emitter", "name": "Flame", "action": "rename", "value": "BigFlame"}
-])
-
-# Parameter operations
-update_niagara_asset("/Game/Effects/NS_Fire", [
-    {"target": "parameter", "emitter": "Flame", "script": "spawn", "name": "SpawnRate", "value": 100.0}
-])
-
-# Stateless module operations (UE 5.7+)
-update_niagara_asset("/Game/Effects/NS_Fire", [
+    {"target": "emitter", "name": "Flame", "action": "rename", "value": "BigFlame"},
+    
+    # Convert to Stateless (UE 5.7+)
+    {"target": "emitter", "name": "Flame", "action": "convert_to_stateless", "force": False},
+    
+    # Parameter operations
+    {"target": "parameter", "emitter": "Flame", "script": "spawn", "name": "SpawnRate", "value": 100.0},
+    
+    # Stateless module operations (UE 5.7+)
     {"target": "stateless_module", "emitter": "Flame", "name": "Lifetime", 
      "action": "set_property", "property": "LifetimeMin", "value": 1.5}
 ])
-```
-
-### `analyze_stateless_compatibility`
-
-Analyze if a Standard emitter can be converted to Stateless mode (UE 5.7+).
-
-```python
-analysis = analyze_stateless_compatibility("/Game/Effects/NS_Fire", "Flame")
-# Returns: can_convert, convertible_modules, unsupported_modules, blockers
-```
-
-### `convert_to_stateless`
-
-Convert Standard emitter to Stateless mode (UE 5.7+).
-
-```python
-if analysis["can_convert"]:
-    result = convert_to_stateless("/Game/Effects/NS_Fire", "Flame")
-    print(f"Migrated {result['migrated_count']} parameters")
-```
-
-### `get_niagara_module_graph`
-
-Read Niagara Module Graph nodes and connections.
-
-```python
-graph = get_niagara_module_graph("/Game/Effects/NS_Fire", "Flame", "spawn")
-# Returns: {"nodes": [...], "connections": [...]}
 ```
 
 ---
@@ -290,7 +308,25 @@ import_fbx(
 | `get_material_functions` | `get_assets(path, "MaterialFunction")` |
 | `get_material_expressions` | `get_material_graph` (nodes field) |
 | `get_material_connections` | `get_material_graph` (connections field) |
+| `get_material_function_content` | `get_material_graph` (now supports MaterialFunction) |
 | `create_light` | `spawn_actor("DirectionalLight", ...)` |
 | `set_light_properties` | `set_actor_properties(...)` |
 | `get_lights` | `get_actors(actor_class="Light")` |
 | `delete_light` | `delete_actor(name)` |
+| `create_material` | `create_asset("Material", name, path)` |
+| `create_material_function` | `create_asset("MaterialFunction", name, path)` |
+| `create_material_instance` | `create_asset("MaterialInstance", name, path, {"parent": ...})` |
+| `set_material_properties` | `set_asset_properties(path, props)` |
+| `set_material_instance_parameter` | `set_asset_properties(path, props)` |
+| `set_texture_properties` | `set_asset_properties(path, props)` |
+| `apply_material_to_actor` | `set_actor_properties(name, {"materials": [...]})` |
+| `apply_material_to_blueprint` | `set_asset_properties(path, {"materials": [...]})` |
+| `get_actor_material_info` | `get_actor_properties(name, ["materials"])` |
+| `get_blueprint_material_info` | `get_asset_properties(path, ["materials"])` |
+| `get_niagara_asset_details` | `get_niagara_emitter` |
+| `update_niagara_asset` | `update_niagara_emitter` |
+| `analyze_stateless_compatibility` | `get_niagara_emitter(include=["stateless_analysis"])` |
+| `convert_to_stateless` | `update_niagara_emitter(..., [{"target": "emitter", "action": "convert_to_stateless"}])` |
+| `get_niagara_module_graph` | `get_niagara_graph(asset_path, emitter, script)` |
+| `get_niagara_script_asset` | `get_niagara_graph(script_path)` |
+| `update_niagara_script_asset` | `update_niagara_graph(script_path, operations)` |

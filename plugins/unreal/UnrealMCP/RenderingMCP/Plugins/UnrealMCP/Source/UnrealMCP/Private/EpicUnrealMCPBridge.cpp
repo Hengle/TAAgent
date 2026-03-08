@@ -55,6 +55,7 @@
 #include "Commands/EpicUnrealMCPBlueprintCommands.h"
 #include "Commands/EpicUnrealMCPBlueprintGraphCommands.h"
 #include "Commands/EpicUnrealMCPEnvironmentCommands.h"
+#include "Commands/EpicUnrealMCPMaterialCommands.h"
 #include "Commands/EpicUnrealMCPCommonUtils.h"
 
 // Default settings
@@ -67,6 +68,7 @@ UEpicUnrealMCPBridge::UEpicUnrealMCPBridge()
     BlueprintCommands = MakeShared<FEpicUnrealMCPBlueprintCommands>();
     BlueprintGraphCommands = MakeShared<FEpicUnrealMCPBlueprintGraphCommands>();
     NiagaraCommands = MakeShared<FEpicUnrealMCPNiagaraCommands>();
+    MaterialCommands = MakeShared<FEpicUnrealMCPMaterialCommands>();
 }
 
 UEpicUnrealMCPBridge::~UEpicUnrealMCPBridge()
@@ -75,6 +77,7 @@ UEpicUnrealMCPBridge::~UEpicUnrealMCPBridge()
     BlueprintCommands.Reset();
     BlueprintGraphCommands.Reset();
     NiagaraCommands.Reset();
+    MaterialCommands.Reset();
 }
 
 // Initialize subsystem
@@ -226,9 +229,6 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
                      CommandType == TEXT("set_actor_transform") ||
                      CommandType == TEXT("spawn_blueprint_actor") ||
                      CommandType == TEXT("import_fbx") ||
-                     CommandType == TEXT("import_texture") ||
-                     CommandType == TEXT("create_material_instance") ||
-                     CommandType == TEXT("set_material_instance_parameter") ||
                      // Generic Asset Management (通用资产操作)
                      CommandType == TEXT("create_asset") ||
                      CommandType == TEXT("delete_asset") ||
@@ -246,25 +246,28 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
                      CommandType == TEXT("compile_blueprint") ||
                      CommandType == TEXT("set_static_mesh_properties") ||
                      CommandType == TEXT("set_mesh_material_color") ||
-                     CommandType == TEXT("create_material") ||
-                     CommandType == TEXT("apply_material_to_actor") ||
-                     CommandType == TEXT("apply_material_to_blueprint") ||
-                     CommandType == TEXT("get_actor_material_info") ||
-                     CommandType == TEXT("get_blueprint_material_info") ||
                      CommandType == TEXT("read_blueprint_content") ||
                      CommandType == TEXT("analyze_blueprint_graph") ||
                      CommandType == TEXT("get_blueprint_variable_details") ||
                      CommandType == TEXT("get_blueprint_function_details") ||
-                     CommandType == TEXT("build_material_graph") ||
-                    CommandType == TEXT("compile_material") ||
-                    CommandType == TEXT("get_material_graph") ||
-                    CommandType == TEXT("create_material_function") ||
-                    CommandType == TEXT("get_material_function_content") ||
-                    CommandType == TEXT("get_assets") ||
-                    CommandType == TEXT("import_texture") ||
-                    CommandType == TEXT("set_static_mesh_asset_properties"))
+                     CommandType == TEXT("get_assets") ||
+                     CommandType == TEXT("set_static_mesh_asset_properties"))
             {
                 ResultJson = BlueprintCommands->HandleCommand(CommandType, Params);
+            }
+            // Material Commands
+            else if (CommandType == TEXT("create_material") ||
+                     CommandType == TEXT("create_material_function") ||
+                     CommandType == TEXT("build_material_graph") ||
+                     CommandType == TEXT("compile_material") ||
+                     CommandType == TEXT("get_material_graph") ||
+                     CommandType == TEXT("set_material_properties") ||
+                     CommandType == TEXT("create_material_instance") ||
+                     CommandType == TEXT("set_material_instance_parameter") ||
+                     CommandType == TEXT("import_texture") ||
+                     CommandType == TEXT("set_texture_properties"))
+            {
+                ResultJson = MaterialCommands->HandleCommand(CommandType, Params);
             }
             // Environment Commands (Generic Actor Management - 5 Core Tools)
             else if (CommandType == TEXT("get_viewport_screenshot") ||
@@ -292,14 +295,11 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
             {
                 ResultJson = BlueprintGraphCommands->HandleCommand(CommandType, Params);
             }
-            // Niagara Commands
-            else if (CommandType == TEXT("get_niagara_asset_details") ||
-                     CommandType == TEXT("update_niagara_asset") ||
-                     CommandType == TEXT("analyze_stateless_compatibility") ||
-                     CommandType == TEXT("convert_to_stateless") ||
-                     CommandType == TEXT("get_niagara_module_graph") ||
-                     CommandType == TEXT("get_niagara_script_asset") ||
-                     CommandType == TEXT("update_niagara_script_asset"))
+            // Niagara Commands (4 consolidated tools)
+            else if (CommandType == TEXT("get_niagara_graph") ||
+                     CommandType == TEXT("update_niagara_graph") ||
+                     CommandType == TEXT("get_niagara_emitter") ||
+                     CommandType == TEXT("update_niagara_emitter"))
             {
                 ResultJson = NiagaraCommands->HandleCommand(CommandType, Params);
             }
