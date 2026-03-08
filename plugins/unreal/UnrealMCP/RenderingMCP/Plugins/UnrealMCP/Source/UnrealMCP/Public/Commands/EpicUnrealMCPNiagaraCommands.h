@@ -103,6 +103,17 @@ private:
      */
     TSharedPtr<FJsonObject> HandleGetNiagaraCompiledCode(const TSharedPtr<FJsonObject>& Params);
     
+    /**
+     * Get particle attribute data from a Niagara component.
+     * 
+     * Captures current particle state from a running Niagara system.
+     * Works by creating a SimCache and reading attributes from it.
+     * 
+     * Input: component_name (actor name in level)
+     * Output: particles array with attributes
+     */
+    TSharedPtr<FJsonObject> HandleGetNiagaraParticleAttributes(const TSharedPtr<FJsonObject>& Params);
+    
     // ============================================================================
     // Helper Functions - Graph
     // ============================================================================

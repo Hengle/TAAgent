@@ -33,6 +33,11 @@
 // Niagara Stack utilities for module operations
 #include "ViewModels/Stack/NiagaraStackGraphUtilities.h"
 
+// Runtime particle data access
+#include "NiagaraComponent.h"
+#include "NiagaraSimCache.h"
+#include "EngineUtils.h"
+
 FEpicUnrealMCPNiagaraCommands::FEpicUnrealMCPNiagaraCommands()
 {
 }
@@ -60,6 +65,10 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleCommand(const FStri
     else if (CommandType == TEXT("get_niagara_compiled_code"))
     {
         return HandleGetNiagaraCompiledCode(Params);
+    }
+    else if (CommandType == TEXT("get_niagara_particle_attributes"))
+    {
+        return HandleGetNiagaraParticleAttributes(Params);
     }
     else
     {
@@ -2796,6 +2805,248 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleGetNiagaraCompiledC
 #else
     Result->SetBoolField(TEXT("success"), false);
     Result->SetStringField(TEXT("error"), TEXT("Compiled code inspection is only available in editor builds (WITH_EDITORONLY_DATA)"));
+#endif
+    
+    return Result;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleGetNiagaraParticleAttributes(const TSharedPtr<FJsonObject>& Params)
+{
+    TSharedPtr<FJsonObject> Result = MakeShareable(new FJsonObject);
+    
+#if WITH_EDITOR
+    // Get component name from params
+    FString ComponentName;
+    if (!Params->TryGetStringField(TEXT("component_name"), ComponentName))
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), TEXT("Missing component_name parameter"));
+        return Result;
+    }
+    
+    // Optional parameters
+    FString EmitterName;
+    Params->TryGetStringField(TEXT("emitter"), EmitterName);
+    
+    TArray<FString> AttributeNames;
+    const TSharedPtr<FJsonObject>* AttrsObj;
+    if (Params->TryGetObjectField(TEXT("attributes"), AttrsObj))
+    {
+        for (const auto& Pair : AttrsObj->Get()->Values)
+        {
+            AttributeNames.Add(Pair.Key);
+        }
+    }
+    
+    int32 FrameIndex = 0;
+    Params->TryGetNumberField(TEXT("frame"), FrameIndex);
+    
+    // Find the Niagara component in the world
+    UNiagaraComponent* NiagaraComponent = nullptr;
+    
+    // Search through all actors in the world
+    for (TActorIterator<AActor> It(GWorld); It; ++It)
+    {
+        AActor* Actor = *It;
+        if (!Actor) continue;
+        
+        // Get all Niagara components from this actor
+        TArray<UNiagaraComponent*> Components;
+        Actor->GetComponents<UNiagaraComponent>(Components);
+        
+        for (UNiagaraComponent* Comp : Components)
+        {
+            if (Comp && Comp->GetName() == ComponentName)
+            {
+                NiagaraComponent = Comp;
+                break;
+            }
+        }
+        
+        if (NiagaraComponent)
+            break;
+    }
+    
+    if (!NiagaraComponent)
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Niagara component not found: %s"), *ComponentName));
+        return Result;
+    }
+    
+    // Get or create SimCache
+    UNiagaraSimCache* SimCache = NiagaraComponent->GetSimCache();
+    bool bCreatedCache = false;
+    
+    if (!SimCache)
+    {
+        // Create a new SimCache for capturing
+        SimCache = NewObject<UNiagaraSimCache>(GetTransientPackage());
+        if (!SimCache)
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), TEXT("Failed to create SimCache"));
+            return Result;
+        }
+        
+        // Begin capturing
+        FNiagaraSimCacheCreateParameters CreateParams = FNiagaraSimCacheCreateParameters::CreateForDebugging();
+        if (!SimCache->BeginWrite(CreateParams, NiagaraComponent))
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), TEXT("Failed to begin SimCache write"));
+            return Result;
+        }
+        
+        // Write current frame
+        if (!SimCache->WriteFrame(NiagaraComponent))
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), TEXT("Failed to write frame to SimCache"));
+            return Result;
+        }
+        
+        SimCache->EndWrite();
+        bCreatedCache = true;
+    }
+    
+    // Get num frames and validate frame index
+    int32 NumFrames = SimCache->GetNumFrames();
+    if (FrameIndex < 0 || FrameIndex >= NumFrames)
+    {
+        FrameIndex = FMath::Clamp(FrameIndex, 0, NumFrames - 1);
+    }
+    
+    // Get emitter info
+    TArray<FName> EmitterNames = SimCache->GetEmitterNames();
+    
+    // Build result
+    Result->SetBoolField(TEXT("success"), true);
+    Result->SetStringField(TEXT("component_name"), ComponentName);
+    Result->SetNumberField(TEXT("num_frames"), NumFrames);
+    Result->SetNumberField(TEXT("current_frame"), FrameIndex);
+    
+    // Emitter data
+    TArray<TSharedPtr<FJsonValue>> EmittersArray;
+    
+    for (int32 EmitterIdx = 0; EmitterIdx < EmitterNames.Num(); ++EmitterIdx)
+    {
+        FName EmitterFName = EmitterNames[EmitterIdx];
+        FString EmitterFNameStr = EmitterFName.ToString();
+        
+        // Skip if specific emitter requested and this isn't it
+        if (!EmitterName.IsEmpty() && EmitterFNameStr != EmitterName)
+        {
+            continue;
+        }
+        
+        TSharedPtr<FJsonObject> EmitterJson = MakeShareable(new FJsonObject);
+        EmitterJson->SetStringField(TEXT("name"), EmitterFNameStr);
+        
+        int32 NumInstances = SimCache->GetEmitterNumInstances(EmitterIdx, FrameIndex);
+        EmitterJson->SetNumberField(TEXT("particle_count"), NumInstances);
+        
+        // Get attribute list
+        TArray<TSharedPtr<FJsonValue>> AttributesList;
+        SimCache->ForEachEmitterAttribute(EmitterIdx, [&](const FNiagaraSimCacheVariable& Var) -> bool
+        {
+            TSharedPtr<FJsonObject> AttrJson = MakeShareable(new FJsonObject);
+            FString VarName = Var.Variable.GetName().ToString();
+            AttrJson->SetStringField(TEXT("name"), VarName);
+            AttrJson->SetNumberField(TEXT("float_count"), Var.FloatCount);
+            AttrJson->SetNumberField(TEXT("int_count"), Var.Int32Count);
+            AttrJson->SetNumberField(TEXT("half_count"), Var.HalfCount);
+            AttributesList.Add(MakeShareable(new FJsonValueObject(AttrJson)));
+            return true;
+        });
+        EmitterJson->SetArrayField(TEXT("attributes"), AttributesList);
+        
+        // Read particle data
+        if (NumInstances > 0)
+        {
+            TArray<TSharedPtr<FJsonValue>> ParticlesArray;
+            
+            // Read common attributes
+            TArray<FVector> Positions;
+            TArray<FLinearColor> Colors;
+            TArray<float> Lifetimes;
+            TArray<float> Ages;
+            TArray<FVector> Velocities;
+            
+            SimCache->ReadPositionAttribute(Positions, FName("Position"), EmitterFName, true, FrameIndex);
+            SimCache->ReadColorAttribute(Colors, FName("Color"), EmitterFName, FrameIndex);
+            SimCache->ReadFloatAttribute(Lifetimes, FName("Lifetime"), EmitterFName, FrameIndex);
+            SimCache->ReadFloatAttribute(Ages, FName("Age"), EmitterFName, FrameIndex);
+            SimCache->ReadVectorAttribute(Velocities, FName("Velocity"), EmitterFName, FrameIndex);
+            
+            for (int32 i = 0; i < NumInstances; ++i)
+            {
+                TSharedPtr<FJsonObject> ParticleJson = MakeShareable(new FJsonObject);
+                ParticleJson->SetNumberField(TEXT("index"), i);
+                
+                // Position
+                if (Positions.IsValidIndex(i))
+                {
+                    TArray<TSharedPtr<FJsonValue>> PosArray;
+                    PosArray.Add(MakeShareable(new FJsonValueNumber(Positions[i].X)));
+                    PosArray.Add(MakeShareable(new FJsonValueNumber(Positions[i].Y)));
+                    PosArray.Add(MakeShareable(new FJsonValueNumber(Positions[i].Z)));
+                    ParticleJson->SetArrayField(TEXT("position"), PosArray);
+                }
+                
+                // Color
+                if (Colors.IsValidIndex(i))
+                {
+                    TArray<TSharedPtr<FJsonValue>> ColorArray;
+                    ColorArray.Add(MakeShareable(new FJsonValueNumber(Colors[i].R)));
+                    ColorArray.Add(MakeShareable(new FJsonValueNumber(Colors[i].G)));
+                    ColorArray.Add(MakeShareable(new FJsonValueNumber(Colors[i].B)));
+                    ColorArray.Add(MakeShareable(new FJsonValueNumber(Colors[i].A)));
+                    ParticleJson->SetArrayField(TEXT("color"), ColorArray);
+                }
+                
+                // Lifetime
+                if (Lifetimes.IsValidIndex(i))
+                {
+                    ParticleJson->SetNumberField(TEXT("lifetime"), Lifetimes[i]);
+                }
+                
+                // Age
+                if (Ages.IsValidIndex(i))
+                {
+                    ParticleJson->SetNumberField(TEXT("age"), Ages[i]);
+                }
+                
+                // Velocity
+                if (Velocities.IsValidIndex(i))
+                {
+                    TArray<TSharedPtr<FJsonValue>> VelArray;
+                    VelArray.Add(MakeShareable(new FJsonValueNumber(Velocities[i].X)));
+                    VelArray.Add(MakeShareable(new FJsonValueNumber(Velocities[i].Y)));
+                    VelArray.Add(MakeShareable(new FJsonValueNumber(Velocities[i].Z)));
+                    ParticleJson->SetArrayField(TEXT("velocity"), VelArray);
+                }
+                
+                ParticlesArray.Add(MakeShareable(new FJsonValueObject(ParticleJson)));
+            }
+            
+            EmitterJson->SetArrayField(TEXT("particles"), ParticlesArray);
+        }
+        
+        EmittersArray.Add(MakeShareable(new FJsonValueObject(EmitterJson)));
+    }
+    
+    Result->SetArrayField(TEXT("emitters"), EmittersArray);
+    
+    // Clean up if we created the cache
+    if (bCreatedCache && SimCache)
+    {
+        // Don't set the cache on the component since we just wanted to read
+    }
+    
+#else
+    Result->SetBoolField(TEXT("success"), false);
+    Result->SetStringField(TEXT("error"), TEXT("Particle attribute inspection requires editor build"));
 #endif
     
     return Result;

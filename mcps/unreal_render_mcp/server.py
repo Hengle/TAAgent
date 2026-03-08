@@ -54,6 +54,7 @@ from tools import (
     get_niagara_emitter,
     update_niagara_emitter,
     get_niagara_compiled_code,
+    get_niagara_particle_attributes,
     # Viewport
     get_viewport_screenshot,
 )
@@ -150,6 +151,7 @@ mcp.tool()(update_niagara_graph)
 mcp.tool()(get_niagara_emitter)
 mcp.tool()(update_niagara_emitter)
 mcp.tool()(get_niagara_compiled_code)
+mcp.tool()(get_niagara_particle_attributes)
 
 
 # ============================================================================

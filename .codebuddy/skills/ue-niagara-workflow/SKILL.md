@@ -579,6 +579,57 @@ print(result["hlsl_gpu"])  # GPU Compute Shader
 | 性能问题 | 分析 HLSL 中的循环和分支 |
 | GPU 编译错误 | 查看 `compile_errors` 数组 |
 
+### 获取运行时粒子属性
+
+```python
+# 从场景中的 Niagara 组件获取粒子数据
+result = get_niagara_particle_attributes(
+    component_name="NiagaraComponent",  # 组件名称
+    emitter="Flame",                    # 可选：指定 emitter
+    frame=0                             # 帧索引（默认当前帧）
+)
+
+# 返回结构
+{
+    "success": true,
+    "component_name": "NiagaraComponent",
+    "num_frames": 1,
+    "emitters": [
+        {
+            "name": "Flame",
+            "particle_count": 100,
+            "attributes": [
+                {"name": "Position", "float_count": 3},
+                {"name": "Color", "float_count": 4},
+                {"name": "Lifetime", "float_count": 1},
+                {"name": "Age", "float_count": 1},
+                {"name": "Velocity", "float_count": 3}
+            ],
+            "particles": [
+                {
+                    "index": 0,
+                    "position": [10.5, 20.3, 5.0],
+                    "color": [1.0, 0.8, 0.2, 1.0],
+                    "lifetime": 2.5,
+                    "age": 0.5,
+                    "velocity": [1.0, 2.0, 0.5]
+                },
+                // ... 更多粒子
+            ]
+        }
+    ]
+}
+```
+
+### Attribute Spreadsheet 使用场景
+
+| 场景 | 用法 |
+|------|------|
+| 调试粒子位置 | 检查 Position 属性是否在预期范围 |
+| 验证生命周期 | 对比 Age 和 Lifetime 检查消亡逻辑 |
+| 性能分析 | 查看 particle_count 识别峰值 |
+| 效果调优 | 检查 Color、Size 等渲染属性 |
+
 ---
 
 ## 相关 Skill

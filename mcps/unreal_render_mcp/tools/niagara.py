@@ -321,3 +321,74 @@ def get_niagara_compiled_code(
         params["emitter"] = emitter
     
     return send_command("get_niagara_compiled_code", params)
+
+
+# ============================================================================
+# Debug Tools - Runtime Particle Inspection
+# ============================================================================
+
+@with_unreal_connection
+def get_niagara_particle_attributes(
+    component_name: str,
+    emitter: Optional[str] = None,
+    frame: int = 0
+) -> Dict[str, Any]:
+    """
+    Get particle attribute data from a running Niagara component.
+    
+    Captures current particle state from a Niagara system in the level.
+    Returns particle data similar to the Attribute Spreadsheet in UE editor.
+    
+    Args:
+        component_name: Name of the Niagara component in the level
+        emitter: Optional emitter name to filter (returns all if not specified)
+        frame: Frame index to read (default 0 = current frame)
+    
+    Returns:
+        {
+            "success": true,
+            "component_name": "NiagaraComponent",
+            "num_frames": 1,
+            "current_frame": 0,
+            "emitters": [
+                {
+                    "name": "EmitterName",
+                    "particle_count": 100,
+                    "attributes": [
+                        {"name": "Position", "float_count": 3},
+                        {"name": "Color", "float_count": 4},
+                        ...
+                    ],
+                    "particles": [
+                        {
+                            "index": 0,
+                            "position": [x, y, z],
+                            "color": [r, g, b, a],
+                            "lifetime": 2.5,
+                            "age": 0.5,
+                            "velocity": [vx, vy, vz]
+                        },
+                        ...
+                    ]
+                }
+            ]
+        }
+    
+    Examples:
+        # Get all particle data from a component
+        result = get_niagara_particle_attributes("MyNiagaraComponent")
+        
+        # Get data for a specific emitter
+        result = get_niagara_particle_attributes(
+            component_name="MyNiagaraComponent",
+            emitter="Flame"
+        )
+    """
+    params = {
+        "component_name": component_name,
+        "frame": frame
+    }
+    if emitter:
+        params["emitter"] = emitter
+    
+    return send_command("get_niagara_particle_attributes", params)
