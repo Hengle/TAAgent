@@ -1,7 +1,7 @@
 [project]
-name = "rendering-mcp"
-version = "1.0.0"
-description = "AI-orchestrated rendering workflow MCP servers for RenderDoc to UE material reconstruction"
+name = "ta-agent-workspace"
+version = "2.0.0"
+description = "TA Agent - AI-powered Technical Artist with MCP tools for rendering, material reconstruction, and performance optimization"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -18,3 +18,7 @@ dev = [
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agent*", "mcps*", "src*"]

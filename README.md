@@ -1,60 +1,151 @@
-# Rendering MCP
+# TA Agent Workspace
 
-AI-orchestrated rendering workflow MCP servers for RenderDoc to Unreal Engine asset reconstruction.
+**AI-Powered Technical Artist** - 一个具备专业 TA 能力的智能代理，MCP 是 Agent 改变世界的工具。
 
-## Overview
-
-Rendering MCP enables AI agents to analyze RenderDoc frame captures and reconstruct game assets (meshes, materials, textures) in Unreal Engine.
-
-### Key Features
-
-- **Mesh Export**: Extract meshes from draw calls to FBX (GPU-driven rendering support)
-- **Material Reconstruction**: Analyze shaders and reconstruct UE materials
-- **Material Analysis**: Read existing UE material graphs and connections
-- **Texture Extraction**: Export and identify texture types automatically
-- **DXBC Analysis**: AI-powered shader bytecode understanding
-- **UE Integration**: Direct asset creation via reflection-based generic tools
-- **Lookdev Tools**: Screenshot capture and lighting for asset validation
-
-## Architecture
+## 核心理念
 
 ```
-AI Agent
-    │
-    ├──► RenderDoc MCP (20 tools)
-    │      • Capture analysis, draw calls, shaders
-    │      • Texture extraction, mesh export (FBX)
-    │
-    └──► Unreal Render MCP (21 tools)
-           • Generic asset/actor tools (reflection-based)
-           • Material graph tools
-           • Viewport capture
+传统: MCP Servers → AI 被动调用工具
+现在: TA Agent → MCP 是 Agent 的"手和眼"
 ```
 
-## Installation
+TA Agent 不只是被动响应工具调用，而是具备：
+- **TA 领域知识**（材质、渲染、性能、管线）
+- **问题分解能力**（分析→诊断→方案→执行）
+- **工具编排能力**（选择合适的 MCP 工具组合）
+- **学习迭代能力**（从结果中学习）
 
-### Prerequisites
+---
+
+## 架构
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                            TA Agent Core                                 │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                   │
+│  │   Persona    │  │  Knowledge   │  │  Reasoning   │                   │
+│  │   TA 身份    │  │  领域知识    │  │  决策引擎    │                   │
+│  └──────────────┘  └──────────────┘  └──────────────┘                   │
+└───────────────────────────────┬─────────────────────────────────────────┘
+                                │
+         ┌──────────────────────┼──────────────────────┐
+         ▼                      ▼                      ▼
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│  Analysis MCP   │    │   Creation MCP  │    │  Validation MCP │
+│  分析类工具      │    │   创作类工具     │    │   验证类工具     │
+├─────────────────┤    ├─────────────────┤    ├─────────────────┤
+│ • RenderDoc     │    │ • Unreal Engine │    │ • Lookdev       │
+│ • PIX (未来)    │    │ • Unity (未来)  │    │ • Performance   │
+│ • Nsight (未来) │    │ • Blender (未来)│    │ • Quality Check │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+---
+
+## 项目结构
+
+```
+ta-agent-workspace/
+│
+├── agent/                        # Agent 核心
+│   ├── persona/                  # TA 身份定义
+│   │   └── ta_persona.md         # 角色设定、专业领域
+│   │
+│   ├── knowledge/                # 领域知识库
+│   │   ├── material-functions/   # 材质函数参考
+│   │   ├── niagara/              # Niagara 知识
+│   │   └── ue-api/               # UE API 参考
+│   │
+│   ├── skills/                   # 技能模块（工作流 SOP）
+│   │   ├── lookdev/              # Lookdev 环境
+│   │   ├── renderdoc-fbx-export/ # Mesh 导出
+│   │   ├── renderdoc-material-reconstruction/
+│   │   └── shadertoy-conversion/ # Shadertoy 转换
+│   │
+│   ├── reasoning/                # 推理框架
+│   │   ├── problem_decomposer.py # 问题分解器
+│   │   └── tool_selector.py      # 工具选择器
+│   │
+│   └── workflows/                # 完整工作流定义
+│       ├── capture-to-asset/     # 捕获→资产重建
+│       ├── shader-porting/       # Shader 移植
+│       └── performance-audit/    # 性能审计
+│
+├── mcps/                         # MCP 工具生态
+│   ├── renderdoc/                # RenderDoc 分析 MCP
+│   │   └── mcp_server/
+│   │       ├── server.py         # FastMCP 工具定义
+│   │       └── bridge/           # TCP 客户端
+│   │
+│   └── unreal-render/            # UE 创作类 MCP
+│       └── server.py             # FastMCP 工具定义
+│
+├── src/extension/                # RenderDoc 扩展
+│   ├── renderdoc_facade.py       # API 门面
+│   ├── socket_server.py          # TCP 服务端
+│   └── services/                 # 服务分解
+│
+├── plugins/unreal/               # UE C++ 插件
+│   └── UnrealMCP/                # TCP 服务端 + 反射调用
+│
+└── docs/                         # 文档
+    ├── tools/                    # 工具文档
+    ├── tutorials/                # 教程
+    └── examples/                 # 示例
+```
+
+---
+
+## MCP 工具参考
+
+### RenderDoc MCP (20 Tools) - 分析类
+
+| 类别 | 工具 |
+|------|------|
+| **捕获** | `get_capture_status`, `open_capture`, `list_captures`, `get_frame_summary` |
+| **Draw Call** | `get_draw_calls`, `get_draw_call_details`, `find_draws_by_*`, `get_action_timings` |
+| **Shader** | `get_shader_info`, `get_pipeline_state` |
+| **纹理** | `get_texture_info`, `get_texture_data`, `save_texture` |
+| **网格** | `get_mesh_data`, `export_mesh_as_fbx`, `export_mesh_csv` |
+
+### Unreal Render MCP (26 Tools) - 创作类
+
+| 类别 | 工具 |
+|------|------|
+| **通用资产** | `create_asset`, `delete_asset`, `get_assets`, `set_asset_properties`, batch_* |
+| **通用 Actor** | `spawn_actor`, `delete_actor`, `get_actors`, `set_actor_properties`, batch_* |
+| **材质图** | `build_material_graph`, `get_material_graph`, `compile_material` |
+| **纹理** | `import_texture`, `set_texture_properties` |
+| **网格** | `import_fbx`, `create_static_mesh_from_data` |
+| **Niagara** | `get_niagara_asset_details`, `update_niagara_asset`, `convert_to_stateless`, ... |
+| **视口** | `get_viewport_screenshot` |
+
+---
+
+## 安装
+
+### 前置要求
 
 - Python 3.10+
 - RenderDoc 1.20+
 - Unreal Engine 5.3+
 
-### Setup
+### 设置
 
 ```bash
-# 1. Clone and install
-git clone https://github.com/your-repo/rendering-mcp.git
-cd rendering-mcp
+# 1. 克隆并安装
+git clone https://github.com/your-repo/ta-agent-workspace.git
+cd ta-agent-workspace
 pip install -e .
 
-# 2. Install RenderDoc extension
+# 2. 安装 RenderDoc 扩展
 python src/scripts/install_extension.py
 
-# 3. Open UE project
+# 3. 打开 UE 项目
 # plugins/unreal/UnrealMCP/RenderingMCP/RenderingMCP.uproject
 ```
 
-### MCP Configuration
+### MCP 配置
 
 **Claude Code / CodeBuddy** (`~/.codebuddy/mcp.json`):
 ```json
@@ -63,186 +154,64 @@ python src/scripts/install_extension.py
     "renderdoc": {
       "command": "python",
       "args": ["-m", "mcp_server.server"],
-      "cwd": "/path/to/rendering-mcp/src/servers/renderdoc_mcp"
+      "cwd": "/path/to/ta-agent-workspace/mcps/renderdoc_mcp"
     },
     "unreal-render": {
       "command": "python",
       "args": ["server.py"],
-      "cwd": "/path/to/rendering-mcp/src/servers/unreal_render_mcp"
+      "cwd": "/path/to/ta-agent-workspace/mcps/unreal_render_mcp"
     }
   }
 }
 ```
 
-## Tools Reference
+---
 
-### RenderDoc MCP (20 Tools)
+## 使用示例
 
-| Category | Tools |
-|----------|-------|
-| **Capture** | `get_capture_status`, `open_capture`, `list_captures`, `get_frame_summary` |
-| **Draw Calls** | `get_draw_calls`, `get_draw_call_details`, `find_draws_by_*`, `get_action_timings` |
-| **Shader** | `get_shader_info`, `save_shader_as_hlsl`, `get_pipeline_state` |
-| **Texture** | `get_texture_info`, `get_texture_data`, `save_texture` |
-| **Mesh** | `get_mesh_data`, `export_mesh_as_fbx`, `get_buffer_contents`, `export_mesh_csv` |
+### Agent 工作方式
 
-### Unreal Render MCP (21 Tools - Clean)
+```
+用户: "帮我从这个 RenderDoc 捕获重建材质"
 
-**Generic Asset Tools** (7) - *New reflection-based*
-```python
-create_asset(type, name, path, properties)      # Any asset type
-delete_asset(path)
-set_asset_properties(path, properties)          # Universal property setting
-get_asset_properties(path, properties?)
-get_assets(path?, asset_class?, name_filter?)   # List assets (use for Niagara: asset_class="NiagaraSystem")
-batch_create_assets(items)
-batch_set_assets_properties(items)
+Agent 思考:
+1. [Persona] 作为 TA，需要先分析捕获
+2. [Decompose] 识别为"材质重建"任务
+3. [Tool Select] 
+   - renderdoc → get_shader_info, get_texture_data
+   - unreal-render → build_material_graph
+4. [Execute] 按工作流执行
+5. [Validate] 截图对比验证
 ```
 
-**Generic Actor Tools** (8) - *New reflection-based*
-```python
-spawn_actor(class, name?, location?, rotation?, scale?, properties?)
-delete_actor(name)
-get_actors(class?, detailed?)
-set_actor_properties(name, properties)          # Universal property setting
-get_actor_properties(name, properties?)
-batch_spawn_actors(items)
-batch_delete_actors(names)
-batch_set_actors_properties(items)
-```
-
-**Material Graph** (Recommended): `build_material_graph` - Batch build entire material graphs in one call
-
-**Material Analysis** (2): `compile_material`, `get_material_graph` - Get complete node graph with connections
-
-**Material Functions**: `get_material_function_content`
-
-**Import** (2): `import_texture`, `import_fbx`
-
-**Niagara** (5): `get_niagara_asset_details` - Deep inspection, `update_niagara_asset` - Batch modify, `analyze_stateless_compatibility` - Check Standard→Stateless conversion, `convert_to_stateless` - Auto-migrate to Stateless (UE 5.7+), `get_niagara_module_graph` - Read module graph nodes/connections
-
-**Viewport** (1): `get_viewport_screenshot`
-
-## Usage Examples
-
-### Mesh Export from Capture
+### 具体工具调用
 
 ```python
+# 材质重建
 open_capture(capture_path="E:/captures/scene.rdc")
 get_draw_calls(flags_filter=["Drawcall"])
-export_mesh_as_fbx(
-    event_id=5249,
-    output_path="output/mesh.fbx",
-    attribute_mapping={
-        "POSITION": "vs_input:ATTRIBUTE0",
-        "NORMAL": "buffer:Buffer1"
-    },
-    buffer_config={"Buffer1": {"stride": 32, "normal_offset": 16}}
-)
-```
+export_mesh_as_fbx(event_id=5249, output_path="output/mesh.fbx", ...)
 
-### Generic Asset Creation (Reflection-Based)
-
-```python
-# Create any asset type
-create_asset("Material", "M_Red", "/Game/Materials/")
-create_asset("MaterialInstance", "MI_Red", properties={"parent": "/Game/Materials/M_Base"})
-
-# Set properties (universal interface)
-set_asset_properties("/Game/Materials/M_Red.M_Red", {
-    "shading_model": "DefaultLit",
-    "blend_mode": "Opaque"
-})
-
-# Batch operations
-batch_create_assets([
-    {"asset_type": "Material", "name": "M_Red"},
-    {"asset_type": "Material", "name": "M_Green"},
-    {"asset_type": "MaterialInstance", "name": "MI_Red", "properties": {"parent": "/Game/Materials/M_Base"}}
-])
-```
-
-### Generic Actor Spawning (Reflection-Based)
-
-```python
-# Spawn any actor type
-spawn_actor("DirectionalLight", "KeyLight",
-    rotation={"pitch": -45, "yaw": 30},
-    properties={"intensity": 10.0, "cast_shadows": True})
-
-spawn_actor("StaticMeshActor", "MaterialBall",
-    location={"x": 0, "y": 0, "z": 100},
-    properties={"static_mesh": "/Engine/BasicShapes/Sphere"})
-
-# Batch operations
-batch_spawn_actors([
-    {"actor_class": "Sphere", "name": "Ball1"},
-    {"actor_class": "Sphere", "name": "Ball2"},
-    {"actor_class": "DirectionalLight", "name": "KeyLight", "properties": {"intensity": 10}}
-])
-
-batch_set_actors_properties([
-    {"name": "KeyLight", "properties": {"intensity": 15.0}},
-    {"name": "FillLight", "properties": {"intensity": 8.0}}
-])
-```
-
-### Batch Material Graph Building
-
-```python
-# Build entire material graph in one call (replaces multiple add/connect calls)
+# UE 创建
 build_material_graph(
-    material_name="M_MyMaterial",
-    nodes=[
-        {"id": "color", "type": "Constant3Vector", "pos_x": -300, "pos_y": 0, 
-         "value": [1.0, 0.0, 0.0]},
-        {"id": "roughness", "type": "Constant", "pos_x": -300, "pos_y": 200, 
-         "value": 0.5},
-        {"id": "tex_base", "type": "TextureSample", "pos_x": -500, "pos_y": 0,
-         "texture": "/Game/Textures/T_BaseColor"}
-    ],
-    connections=[
-        {"source": "tex_base", "target": "Material", "target_input": "BaseColor"},
-        {"source": "color", "target": "Material", "target_input": "EmissiveColor"},
-        {"source": "roughness", "target": "Material", "target_input": "Roughness"}
-    ],
-    properties={"shading_model": "DefaultLit", "blend_mode": "Opaque"},
-    compile=True
+    material_name="M_Reconstructed",
+    nodes=[...],
+    connections=[...]
 )
 ```
 
-## Skills (Workflows)
+---
 
-| Skill | Description |
-|-------|-------------|
-| **renderdoc-fbx-export** | Mesh export workflow |
-| **renderdoc-material-reconstruction** | Shader analysis and material reconstruction |
-| **lookdev** | Asset validation environment |
-| **shadertoy-conversion** | Shadertoy to UE conversion |
+## 工作流
 
-## Documentation
+| 工作流 | 描述 |
+|--------|------|
+| **capture-to-asset** | 从捕获重建资产 |
+| **shader-porting** | Shader 移植 |
+| **performance-audit** | 性能审计 |
 
-| Category | Document | Path |
-|----------|----------|------|
-| **Tools** | UE MCP Tools Reference | `docs/tools/unreal-mcp-tools.md` |
-| **Knowledge** | UE 5.7+ API Notes | `docs/knowledge/ue-api/ue5.7-api-notes.md` |
-| **Knowledge** | Material Functions | `docs/knowledge/material-functions/` |
-| **Project** | Setup & Build Guide | `docs/project/setup.md` |
-| **Workflow** | FBX Export | `docs/skills/renderdoc-fbx-export/workflow.md` |
-| **Workflow** | Material Reconstruction | `docs/skills/renderdoc-material-reconstruction/workflow.md` |
-| **Workflow** | Lookdev Guide | `docs/skills/lookdev/skill.md` |
-| **Tutorials** | Prompt Examples | `docs/tutorials/prompt-examples.md` |
-| **Examples** | Material Examples | `docs/examples/materials/` |
+---
 
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| MCP connection failed | Check config path and server status |
-| FBX normals inverted | Set `flip_winding_order=True` |
-| GPU-driven mesh export | Use `buffer_config` parameter |
-| UE compile errors | Rebuild plugin for your UE version |
-
-## License
+## 许可证
 
 MIT License
