@@ -20,6 +20,15 @@ description: |
 - 参数调整与优化
 - Stateless 转换
 
+## 参考文档
+
+以下参考文档按需加载：
+
+| 文件 | 用途 | 加载时机 |
+|------|------|----------|
+| `references/engine-modules.md` | UE5.7 引擎 Niagara 模块完整列表 (270+) | 需要查找模块路径时 |
+| `references/common-modules.md` | 常用模块详解 (参数、属性、实现原理) | 需要了解模块参数、编写模块配置时 |
+
 ---
 
 ## 核心原理：Niagara 仿真架构

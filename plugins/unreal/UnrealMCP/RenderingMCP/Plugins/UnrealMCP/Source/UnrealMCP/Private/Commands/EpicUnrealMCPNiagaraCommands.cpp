@@ -2365,6 +2365,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraGraph(
     // Get the script
     UNiagaraScript* Script = nullptr;
     UNiagaraSystem* NiagaraSystem = nullptr;
+    FGuid EmitterHandleId;  // Store emitter ID for module operations
     
     if (bUseStandaloneScript)
     {
@@ -2394,6 +2395,8 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraGraph(
             Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Emitter not found: %s"), *EmitterName));
             return Result;
         }
+        
+        EmitterHandleId = Handle->GetId();  // Save for later module operations
 
         FVersionedNiagaraEmitterData* EmitterData = Handle->GetEmitterData();
         if (!EmitterData)
@@ -2535,11 +2538,53 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraGraph(
                         Script->Modify();
                         FuncNode->Modify();
 
+                        // Find input and output pins for the ParameterMap chain
+                        UEdGraphPin* InputMapPin = nullptr;
+                        UEdGraphPin* OutputMapPin = nullptr;
+                        
                         for (UEdGraphPin* Pin : FuncNode->Pins)
                         {
-                            if (Pin)
+                            if (Pin->GetName() == TEXT("InputMap") && Pin->Direction == EGPD_Input)
                             {
-                                Pin->BreakAllPinLinks();
+                                InputMapPin = Pin;
+                            }
+                            else if (Pin->GetName() == TEXT("OutputMap") && Pin->Direction == EGPD_Output)
+                            {
+                                OutputMapPin = Pin;
+                            }
+                        }
+
+                        // Reconnect the chain: previous output -> next input
+                        if (InputMapPin && OutputMapPin)
+                        {
+                            // Get the connected source pin (from previous module)
+                            TArray<UEdGraphPin*> ConnectedInputPins = InputMapPin->LinkedTo;
+                            
+                            // Get all pins connected to our output (next modules)
+                            TArray<UEdGraphPin*> ConnectedOutputPins = OutputMapPin->LinkedTo;
+                            
+                            // Break all connections
+                            InputMapPin->BreakAllPinLinks();
+                            OutputMapPin->BreakAllPinLinks();
+                            
+                            // Reconnect: previous module's output -> next module's input
+                            for (UEdGraphPin* SourcePin : ConnectedInputPins)
+                            {
+                                for (UEdGraphPin* TargetPin : ConnectedOutputPins)
+                                {
+                                    SourcePin->MakeLinkTo(TargetPin);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            // Fallback: just break all links
+                            for (UEdGraphPin* Pin : FuncNode->Pins)
+                            {
+                                if (Pin)
+                                {
+                                    Pin->BreakAllPinLinks();
+                                }
                             }
                         }
 

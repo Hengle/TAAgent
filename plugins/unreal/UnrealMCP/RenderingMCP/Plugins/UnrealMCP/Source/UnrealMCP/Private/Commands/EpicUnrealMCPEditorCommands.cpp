@@ -38,6 +38,10 @@
 #include "StaticMeshAttributes.h"
 #include "MeshDescription.h"
 
+// Niagara System creation support
+#include "NiagaraSystem.h"
+#include "NiagaraSystemFactoryNew.h"
+
 FEpicUnrealMCPEditorCommands::FEpicUnrealMCPEditorCommands()
 {
 }
@@ -1010,6 +1014,16 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleCreateAsset(const TS
         {
             // MaterialFunction description is set via Description property directly
             MaterialFunction->PostEditChange();
+        }
+    }
+    else if (AssetType == TEXT("NiagaraSystem"))
+    {
+        UNiagaraSystem* NiagaraSystem = Cast<UNiagaraSystem>(NewAsset);
+        if (NiagaraSystem)
+        {
+            // Initialize the Niagara system with default scripts and editor data
+            UNiagaraSystemFactoryNew::InitializeSystem(NiagaraSystem, true);
+            NiagaraSystem->PostEditChange();
         }
     }
 

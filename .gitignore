@@ -53,6 +53,9 @@ plugins/unreal/UnrealMCP/RenderingMCP/DerivedDataCache/
 plugins/unreal/UnrealMCP/RenderingMCP/Saved/
 plugins/unreal/UnrealMCP/RenderingMCP/.vs/
 
+# UE plugin package output (generated copy)
+plugins/unreal/UnrealMCP/RenderingMCP/Plugins/UnrealMCP/Package/
+
 # ============================================
 # IDE
 # ============================================
