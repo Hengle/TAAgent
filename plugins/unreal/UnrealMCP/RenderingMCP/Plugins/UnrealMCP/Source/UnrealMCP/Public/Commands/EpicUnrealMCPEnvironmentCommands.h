@@ -60,11 +60,37 @@ public:
     
     /** Batch set properties on multiple actors */
     static TSharedPtr<FJsonObject> HandleBatchSetActorsProperties(const TSharedPtr<FJsonObject>& Params);
-    
+
+    // ============================================================================
+    // Viewport Camera Control
+    // ============================================================================
+
+    /** Set editor viewport camera position and rotation */
+    static TSharedPtr<FJsonObject> HandleSetViewportCamera(const TSharedPtr<FJsonObject>& Params);
+
+    /** Get current editor viewport camera info */
+    static TSharedPtr<FJsonObject> HandleGetViewportCamera(const TSharedPtr<FJsonObject>& Params);
+
+    // ============================================================================
+    // Level Management
+    // ============================================================================
+
+    /** Create a new level */
+    static TSharedPtr<FJsonObject> HandleCreateLevel(const TSharedPtr<FJsonObject>& Params);
+
+    /** Load an existing level */
+    static TSharedPtr<FJsonObject> HandleLoadLevel(const TSharedPtr<FJsonObject>& Params);
+
+    /** Save the current level */
+    static TSharedPtr<FJsonObject> HandleSaveCurrentLevel(const TSharedPtr<FJsonObject>& Params);
+
+    /** Get current level info */
+    static TSharedPtr<FJsonObject> HandleGetCurrentLevel(const TSharedPtr<FJsonObject>& Params);
+
     // ============================================================================
     // Reflection-based Property Helpers
     // ============================================================================
-    
+
     /** Find UClass by name (supports A, U prefixes and partial matching) */
     static UClass* FindClassByName(const FString& ClassName);
     

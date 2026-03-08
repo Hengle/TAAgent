@@ -42,6 +42,10 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Base64.h"
 
+// Level includes
+#include "Editor/UnrealEd/Public/FileHelpers.h"
+#include "Engine/Level.h"
+
 // ============================================================================
 // Viewport Screenshot
 // ============================================================================
@@ -217,6 +221,32 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleCommand(const F
     else if (CommandType == TEXT("get_viewport_screenshot"))
     {
         return HandleGetViewportScreenshot(Params);
+    }
+    // Viewport Camera Control
+    else if (CommandType == TEXT("set_viewport_camera"))
+    {
+        return HandleSetViewportCamera(Params);
+    }
+    else if (CommandType == TEXT("get_viewport_camera"))
+    {
+        return HandleGetViewportCamera(Params);
+    }
+    // Level Management
+    else if (CommandType == TEXT("create_level"))
+    {
+        return HandleCreateLevel(Params);
+    }
+    else if (CommandType == TEXT("load_level"))
+    {
+        return HandleLoadLevel(Params);
+    }
+    else if (CommandType == TEXT("save_current_level"))
+    {
+        return HandleSaveCurrentLevel(Params);
+    }
+    else if (CommandType == TEXT("get_current_level"))
+    {
+        return HandleGetCurrentLevel(Params);
     }
     
     return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown environment command: %s"), *CommandType));
@@ -1340,6 +1370,299 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleBatchSetActorsP
     ResultObj->SetNumberField(TEXT("success_count"), SuccessCount);
     ResultObj->SetNumberField(TEXT("fail_count"), FailCount);
     ResultObj->SetNumberField(TEXT("total_count"), ActorsArray->Num());
+
+    return ResultObj;
+}
+
+// ============================================================================
+// Viewport Camera Control
+// ============================================================================
+TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleSetViewportCamera(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!GEditor)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Editor not available"));
+    }
+
+    // Get active viewport client
+    FEditorViewportClient* ViewportClient = nullptr;
+    if (FLevelEditorModule* LevelEditorModule = FModuleManager::GetModulePtr<FLevelEditorModule>(TEXT("LevelEditor")))
+    {
+        TSharedPtr<IAssetViewport> ActiveViewport = LevelEditorModule->GetFirstActiveViewport();
+        if (ActiveViewport.IsValid())
+        {
+            ViewportClient = &ActiveViewport->GetAssetViewportClient();
+        }
+    }
+
+    if (!ViewportClient)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("No active viewport found"));
+    }
+
+    // Get current camera info for defaults
+    FVector CurrentLocation = ViewportClient->GetViewLocation();
+    FRotator CurrentRotation = ViewportClient->GetViewRotation();
+
+    // Parse location
+    FVector NewLocation = CurrentLocation;
+    const TSharedPtr<FJsonObject>* LocationObj;
+    if (Params->TryGetObjectField(TEXT("location"), LocationObj))
+    {
+        double X = CurrentLocation.X;
+        double Y = CurrentLocation.Y;
+        double Z = CurrentLocation.Z;
+        LocationObj->Get()->TryGetNumberField(TEXT("x"), X);
+        LocationObj->Get()->TryGetNumberField(TEXT("y"), Y);
+        LocationObj->Get()->TryGetNumberField(TEXT("z"), Z);
+        NewLocation = FVector(X, Y, Z);
+    }
+
+    // Parse rotation
+    FRotator NewRotation = CurrentRotation;
+    const TSharedPtr<FJsonObject>* RotationObj;
+    if (Params->TryGetObjectField(TEXT("rotation"), RotationObj))
+    {
+        double Pitch = CurrentRotation.Pitch;
+        double Yaw = CurrentRotation.Yaw;
+        double Roll = CurrentRotation.Roll;
+        RotationObj->Get()->TryGetNumberField(TEXT("pitch"), Pitch);
+        RotationObj->Get()->TryGetNumberField(TEXT("yaw"), Yaw);
+        RotationObj->Get()->TryGetNumberField(TEXT("roll"), Roll);
+        NewRotation = FRotator(Pitch, Yaw, Roll);
+    }
+
+    // Set camera transform
+    ViewportClient->SetViewLocation(NewLocation);
+    ViewportClient->SetViewRotation(NewRotation);
+
+    // Handle FOV for perspective mode
+    bool bPerspective = true;
+    Params->TryGetBoolField(TEXT("perspective"), bPerspective);
+
+    if (bPerspective)
+    {
+        ViewportClient->SetViewportType(LVT_Perspective);
+        float FOV = 90.0f;
+        if (Params->TryGetNumberField(TEXT("fov"), FOV))
+        {
+            ViewportClient->ViewFOV = FOV;
+        }
+    }
+    else
+    {
+        // Orthographic mode
+        float OrthoWidth = 10000.0f;
+        Params->TryGetNumberField(TEXT("ortho_width"), OrthoWidth);
+        ViewportClient->SetOrthoZoom(OrthoWidth);
+    }
+
+    ViewportClient->Invalidate();
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), true);
+
+    TSharedPtr<FJsonObject> LocationResult = MakeShared<FJsonObject>();
+    LocationResult->SetNumberField(TEXT("x"), NewLocation.X);
+    LocationResult->SetNumberField(TEXT("y"), NewLocation.Y);
+    LocationResult->SetNumberField(TEXT("z"), NewLocation.Z);
+    ResultObj->SetObjectField(TEXT("location"), LocationResult);
+
+    TSharedPtr<FJsonObject> RotationResult = MakeShared<FJsonObject>();
+    RotationResult->SetNumberField(TEXT("pitch"), NewRotation.Pitch);
+    RotationResult->SetNumberField(TEXT("yaw"), NewRotation.Yaw);
+    RotationResult->SetNumberField(TEXT("roll"), NewRotation.Roll);
+    ResultObj->SetObjectField(TEXT("rotation"), RotationResult);
+
+    ResultObj->SetBoolField(TEXT("perspective"), bPerspective);
+    if (bPerspective)
+    {
+        ResultObj->SetNumberField(TEXT("fov"), ViewportClient->ViewFOV);
+    }
+
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleGetViewportCamera(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!GEditor)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Editor not available"));
+    }
+
+    FEditorViewportClient* ViewportClient = nullptr;
+    if (FLevelEditorModule* LevelEditorModule = FModuleManager::GetModulePtr<FLevelEditorModule>(TEXT("LevelEditor")))
+    {
+        TSharedPtr<IAssetViewport> ActiveViewport = LevelEditorModule->GetFirstActiveViewport();
+        if (ActiveViewport.IsValid())
+        {
+            ViewportClient = &ActiveViewport->GetAssetViewportClient();
+        }
+    }
+
+    if (!ViewportClient)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("No active viewport found"));
+    }
+
+    FVector Location = ViewportClient->GetViewLocation();
+    FRotator Rotation = ViewportClient->GetViewRotation();
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), true);
+
+    TSharedPtr<FJsonObject> LocationObj = MakeShared<FJsonObject>();
+    LocationObj->SetNumberField(TEXT("x"), Location.X);
+    LocationObj->SetNumberField(TEXT("y"), Location.Y);
+    LocationObj->SetNumberField(TEXT("z"), Location.Z);
+    ResultObj->SetObjectField(TEXT("location"), LocationObj);
+
+    TSharedPtr<FJsonObject> RotationObj = MakeShared<FJsonObject>();
+    RotationObj->SetNumberField(TEXT("pitch"), Rotation.Pitch);
+    RotationObj->SetNumberField(TEXT("yaw"), Rotation.Yaw);
+    RotationObj->SetNumberField(TEXT("roll"), Rotation.Roll);
+    ResultObj->SetObjectField(TEXT("rotation"), RotationObj);
+
+    bool bPerspective = ViewportClient->GetViewportType() == LVT_Perspective;
+    ResultObj->SetBoolField(TEXT("perspective"), bPerspective);
+    ResultObj->SetNumberField(TEXT("fov"), ViewportClient->ViewFOV);
+    ResultObj->SetNumberField(TEXT("ortho_zoom"), ViewportClient->GetOrthoZoom());
+
+    return ResultObj;
+}
+
+// ============================================================================
+// Level Management
+// ============================================================================
+TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleCreateLevel(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!GEditor)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Editor not available"));
+    }
+
+    FString LevelPath;
+    if (!Params->TryGetStringField(TEXT("level_path"), LevelPath) || LevelPath.IsEmpty())
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'level_path' parameter"));
+    }
+
+    // Ensure path starts with /Game/
+    if (!LevelPath.StartsWith(TEXT("/Game/")))
+    {
+        LevelPath = TEXT("/Game/") + LevelPath;
+    }
+
+    // Create new map (this clears current level)
+    UWorld* NewWorld = GEditor->NewMap();
+    if (!NewWorld)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to create new map"));
+    }
+
+    // Save the level to the specified path
+    FString PackagePath = LevelPath;
+    if (!PackagePath.EndsWith(TEXT(".umap")))
+    {
+        PackagePath += TEXT(".umap");
+    }
+
+    bool bSuccess = FEditorFileUtils::SaveLevel(NewWorld->GetCurrentLevel(), *PackagePath);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), bSuccess);
+    ResultObj->SetStringField(TEXT("level_path"), LevelPath);
+    ResultObj->SetStringField(TEXT("message"), bSuccess ? TEXT("Level created successfully") : TEXT("Failed to save level"));
+
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleLoadLevel(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!GEditor)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Editor not available"));
+    }
+
+    FString LevelPath;
+    if (!Params->TryGetStringField(TEXT("level_path"), LevelPath) || LevelPath.IsEmpty())
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'level_path' parameter"));
+    }
+
+    // Ensure path starts with /Game/
+    if (!LevelPath.StartsWith(TEXT("/Game/")))
+    {
+        LevelPath = TEXT("/Game/") + LevelPath;
+    }
+
+    // Add .umap extension if not present
+    if (!LevelPath.EndsWith(TEXT(".umap")))
+    {
+        LevelPath += TEXT(".umap");
+    }
+
+    // Load the level
+    bool bSuccess = FEditorFileUtils::LoadMap(*LevelPath, false, true);
+
+    if (!bSuccess)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Failed to load level: %s"), *LevelPath));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), true);
+    ResultObj->SetStringField(TEXT("level_path"), LevelPath);
+    ResultObj->SetStringField(TEXT("message"), TEXT("Level loaded successfully"));
+
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleSaveCurrentLevel(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!GEditor)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Editor not available"));
+    }
+
+    UWorld* World = GEditor->GetEditorWorldContext().World();
+    if (!World)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("No active world found"));
+    }
+
+    FString LevelPath = World->GetCurrentLevel()->GetPackage()->GetName();
+    bool bSuccess = FEditorFileUtils::SaveCurrentLevel();
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), bSuccess);
+    ResultObj->SetStringField(TEXT("level_path"), LevelPath);
+    ResultObj->SetStringField(TEXT("message"), bSuccess ? TEXT("Level saved successfully") : TEXT("Failed to save level"));
+
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleGetCurrentLevel(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!GEditor)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Editor not available"));
+    }
+
+    UWorld* World = GEditor->GetEditorWorldContext().World();
+    if (!World)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("No active world found"));
+    }
+
+    FString LevelName = World->GetCurrentLevel()->GetName();
+    FString LevelPath = World->GetCurrentLevel()->GetPackage()->GetName();
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), true);
+    ResultObj->SetStringField(TEXT("level_name"), LevelName);
+    ResultObj->SetStringField(TEXT("level_path"), LevelPath);
 
     return ResultObj;
 }

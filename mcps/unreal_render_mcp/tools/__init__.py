@@ -53,6 +53,15 @@ from niagara import (
 
 from viewport import (
     get_viewport_screenshot,
+    set_viewport_camera,
+    get_viewport_camera,
+)
+
+from editor import (
+    create_level,
+    load_level,
+    save_current_level,
+    get_current_level,
 )
 
 __all__ = [
@@ -89,4 +98,11 @@ __all__ = [
     "get_niagara_particle_attributes",
     # Viewport
     "get_viewport_screenshot",
+    "set_viewport_camera",
+    "get_viewport_camera",
+    # Editor
+    "create_level",
+    "load_level",
+    "save_current_level",
+    "get_current_level",
 ]

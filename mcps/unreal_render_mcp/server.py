@@ -54,6 +54,13 @@ from tools import (
     get_niagara_particle_attributes,
     # Viewport
     get_viewport_screenshot,
+    set_viewport_camera,
+    get_viewport_camera,
+    # Editor
+    create_level,
+    load_level,
+    save_current_level,
+    get_current_level,
 )
 
 
@@ -153,6 +160,18 @@ mcp.tool()(get_niagara_particle_attributes)
 # ============================================================================
 
 mcp.tool()(get_viewport_screenshot)
+mcp.tool()(set_viewport_camera)
+mcp.tool()(get_viewport_camera)
+
+
+# ============================================================================
+# Register Editor Tools
+# ============================================================================
+
+mcp.tool()(create_level)
+mcp.tool()(load_level)
+mcp.tool()(save_current_level)
+mcp.tool()(get_current_level)
 
 
 # ============================================================================
