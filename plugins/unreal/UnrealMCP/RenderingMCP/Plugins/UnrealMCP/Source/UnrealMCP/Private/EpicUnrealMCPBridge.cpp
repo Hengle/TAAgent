@@ -294,7 +294,12 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
             }
             // Niagara Commands
             else if (CommandType == TEXT("get_niagara_asset_details") ||
-                     CommandType == TEXT("update_niagara_asset"))
+                     CommandType == TEXT("update_niagara_asset") ||
+                     CommandType == TEXT("analyze_stateless_compatibility") ||
+                     CommandType == TEXT("convert_to_stateless") ||
+                     CommandType == TEXT("get_niagara_module_graph") ||
+                     CommandType == TEXT("get_niagara_script_asset") ||
+                     CommandType == TEXT("update_niagara_script_asset"))
             {
                 ResultJson = NiagaraCommands->HandleCommand(CommandType, Params);
             }

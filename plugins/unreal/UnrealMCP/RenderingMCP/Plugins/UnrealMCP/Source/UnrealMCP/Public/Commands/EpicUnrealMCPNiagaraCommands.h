@@ -98,6 +98,34 @@ private:
      */
     TSharedPtr<FJsonObject> HandleGetNiagaraModuleGraph(const TSharedPtr<FJsonObject>& Params);
     
+    /**
+     * Get Niagara Script Asset - read standalone Niagara Script assets.
+     * For Module Scripts, Function Scripts, etc.
+     *
+     * Note: This is for standalone script assets, NOT scripts within a Niagara System.
+     * For scripts within a System, use get_niagara_asset_details.
+     *
+     * Parameters:
+     * - script_path: Full path to the Niagara Script (e.g. "/Niagara/Modules/Update/Forces/CurlNoiseForce.CurlNoiseForce")
+     *
+     * Returns script metadata and graph structure.
+     */
+    TSharedPtr<FJsonObject> HandleGetNiagaraScriptAsset(const TSharedPtr<FJsonObject>& Params);
+
+    /**
+     * Update Niagara Script Asset - modify standalone Niagara Script assets.
+     * For Module Scripts, Function Scripts, etc.
+     *
+     * Note: This is for standalone script assets, NOT scripts within a Niagara System.
+     * For modifying scripts within a System, use update_niagara_asset.
+     *
+     * Operations:
+     * - add_module: Add a module to the script
+     * - remove_module: Remove a module from the script
+     * - set_parameter: Set a parameter value
+     */
+    TSharedPtr<FJsonObject> HandleUpdateNiagaraScriptAsset(const TSharedPtr<FJsonObject>& Params);
+    
     // ============================================================================
     // Helper Functions - Read
     // ============================================================================

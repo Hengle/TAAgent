@@ -30,6 +30,9 @@
 #include "NiagaraScriptSource.h"
 #include "EdGraph/EdGraphPin.h"
 
+// Niagara Stack utilities for module operations
+#include "ViewModels/Stack/NiagaraStackGraphUtilities.h"
+
 FEpicUnrealMCPNiagaraCommands::FEpicUnrealMCPNiagaraCommands()
 {
 }
@@ -55,6 +58,14 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleCommand(const FStri
     else if (CommandType == TEXT("get_niagara_module_graph"))
     {
         return HandleGetNiagaraModuleGraph(Params);
+    }
+    else if (CommandType == TEXT("get_niagara_script_asset"))
+    {
+        return HandleGetNiagaraScriptAsset(Params);
+    }
+    else if (CommandType == TEXT("update_niagara_script_asset"))
+    {
+        return HandleUpdateNiagaraScriptAsset(Params);
     }
     else
     {
@@ -776,12 +787,113 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::ProcessEmitterOperation(U
         Result->SetStringField(TEXT("emitter_name"), EmitterName);
         Result->SetStringField(TEXT("mode"), ModeStr);
     }
+    // Add module to emitter script (spawn or update)
+    else if (Action == TEXT("add_module"))
+    {
+        FString ModulePath;
+        if (!Op->TryGetStringField(TEXT("module_path"), ModulePath))
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), TEXT("Missing 'module_path' parameter for add_module action"));
+            return Result;
+        }
+
+        // Determine which script to add to (default: update)
+        FString ScriptType = TEXT("update");
+        Op->TryGetStringField(TEXT("script"), ScriptType);
+
+        ENiagaraScriptUsage TargetUsage = (ScriptType.ToLower() == TEXT("spawn"))
+            ? ENiagaraScriptUsage::ParticleSpawnScript
+            : ENiagaraScriptUsage::ParticleUpdateScript;
+
+        // Load module script
+        UNiagaraScript* ModuleScript = LoadObject<UNiagaraScript>(nullptr, *ModulePath);
+        if (!ModuleScript)
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to load module: %s"), *ModulePath));
+            return Result;
+        }
+
+        // Get emitter data and target script
+        FVersionedNiagaraEmitterData* EmitterData = Handle->GetEmitterData();
+        if (!EmitterData)
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), TEXT("Failed to get emitter data"));
+            return Result;
+        }
+
+        UNiagaraScript* TargetScript = EmitterData->GetScript(TargetUsage, FGuid());
+        if (!TargetScript)
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to get %s script"), *ScriptType));
+            return Result;
+        }
+
+        // Get graph from script source
+        UNiagaraScriptSource* ScriptSource = Cast<UNiagaraScriptSource>(TargetScript->GetSource(FGuid()));
+        if (!ScriptSource || !ScriptSource->NodeGraph)
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), TEXT("Failed to get script graph"));
+            return Result;
+        }
+
+        UNiagaraGraph* Graph = ScriptSource->NodeGraph;
+
+        // Find output node
+        UNiagaraNodeOutput* OutputNode = nullptr;
+        for (UEdGraphNode* NodeBase : Graph->Nodes)
+        {
+            UNiagaraNodeOutput* Node = Cast<UNiagaraNodeOutput>(NodeBase);
+            if (Node && Node->GetUsage() == TargetUsage)
+            {
+                OutputNode = Node;
+                break;
+            }
+        }
+
+        if (!OutputNode)
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), TEXT("Failed to find output node"));
+            return Result;
+        }
+
+        // Add module to stack
+        UNiagaraNodeFunctionCall* NewModule = FNiagaraStackGraphUtilities::AddScriptModuleToStack(
+            ModuleScript,
+            *OutputNode,
+            INDEX_NONE,      // TargetIndex - add to end
+            FString(),       // SuggestedName - empty for default
+            FGuid()          // VersionGuid - empty for default
+        );
+
+        if (NewModule)
+        {
+            TargetScript->Modify();
+
+            Result->SetBoolField(TEXT("success"), true);
+            Result->SetStringField(TEXT("action"), TEXT("add_module"));
+            Result->SetStringField(TEXT("emitter_name"), EmitterName);
+            Result->SetStringField(TEXT("script"), ScriptType);
+            Result->SetStringField(TEXT("module_path"), ModulePath);
+            Result->SetStringField(TEXT("module_name"), NewModule->GetName());
+        }
+        else
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), TEXT("Failed to add module to stack"));
+        }
+    }
     else
     {
         Result->SetBoolField(TEXT("success"), false);
         Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Unknown emitter action: %s"), *Action));
     }
-    
+
     return Result;
 }
 
@@ -2261,4 +2373,390 @@ TArray<TSharedPtr<FJsonValue>> FEpicUnrealMCPNiagaraCommands::GetNodeConnections
     }
     
     return Connections;
+}
+
+// ============================================================================
+// Niagara Script Operations (for any Niagara Script asset)
+// ============================================================================
+// Niagara Script Asset Operations (for standalone Module/Function scripts)
+// ============================================================================
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleGetNiagaraScriptAsset(const TSharedPtr<FJsonObject>& Params)
+{
+    TSharedPtr<FJsonObject> Result = MakeShareable(new FJsonObject);
+    
+    FString ScriptPath;
+    if (!Params->TryGetStringField(TEXT("script_path"), ScriptPath))
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), TEXT("Missing required parameter: script_path"));
+        return Result;
+    }
+    
+    // Load the Niagara Script asset directly
+    UNiagaraScript* Script = LoadObject<UNiagaraScript>(nullptr, *ScriptPath);
+    if (!Script)
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to load Niagara script: %s"), *ScriptPath));
+        return Result;
+    }
+    
+    // Get script metadata
+    Result->SetBoolField(TEXT("success"), true);
+    Result->SetStringField(TEXT("script_path"), ScriptPath);
+    Result->SetStringField(TEXT("script_name"), Script->GetName());
+    
+    // Get script usage
+    FString UsageStr = TEXT("Unknown");
+    switch (Script->GetUsage())
+    {
+        case ENiagaraScriptUsage::Function: UsageStr = TEXT("Function"); break;
+        case ENiagaraScriptUsage::Module: UsageStr = TEXT("Module"); break;
+        case ENiagaraScriptUsage::DynamicInput: UsageStr = TEXT("DynamicInput"); break;
+        case ENiagaraScriptUsage::ParticleSpawnScript: UsageStr = TEXT("ParticleSpawn"); break;
+        case ENiagaraScriptUsage::ParticleUpdateScript: UsageStr = TEXT("ParticleUpdate"); break;
+        case ENiagaraScriptUsage::EmitterSpawnScript: UsageStr = TEXT("EmitterSpawn"); break;
+        case ENiagaraScriptUsage::EmitterUpdateScript: UsageStr = TEXT("EmitterUpdate"); break;
+        case ENiagaraScriptUsage::SystemSpawnScript: UsageStr = TEXT("SystemSpawn"); break;
+        case ENiagaraScriptUsage::SystemUpdateScript: UsageStr = TEXT("SystemUpdate"); break;
+        case ENiagaraScriptUsage::ParticleEventScript: UsageStr = TEXT("ParticleEvent"); break;
+        default: break;
+    }
+    Result->SetStringField(TEXT("usage"), UsageStr);
+    
+    // Get description
+    Result->SetStringField(TEXT("description"), Script->GetDescription(FGuid()).ToString());
+    
+    // Get graph
+    UNiagaraScriptSource* Source = Cast<UNiagaraScriptSource>(Script->GetLatestSource());
+    UNiagaraGraph* Graph = Source ? Source->NodeGraph : nullptr;
+    
+    if (!Graph)
+    {
+        Result->SetBoolField(TEXT("has_graph"), false);
+        return Result;
+    }
+    
+    Result->SetBoolField(TEXT("has_graph"), true);
+    
+    // Build node ID map
+    TMap<UEdGraphNode*, FString> NodeIdMap;
+    int32 NodeIndex = 0;
+    for (UEdGraphNode* NodeBase : Graph->Nodes)
+    {
+        if (NodeBase)
+        {
+            FString NodeId = FString::Printf(TEXT("Node_%d"), NodeIndex++);
+            NodeIdMap.Add(NodeBase, NodeId);
+        }
+    }
+    
+    // Build nodes array
+    TArray<TSharedPtr<FJsonValue>> NodesArray;
+    TArray<TSharedPtr<FJsonValue>> ConnectionsArray;
+    
+    for (UEdGraphNode* NodeBase : Graph->Nodes)
+    {
+        UNiagaraNode* Node = Cast<UNiagaraNode>(NodeBase);
+        if (!Node) continue;
+        
+        // Get node details
+        TSharedPtr<FJsonObject> NodeJson = GetNodeDetails(Node);
+        FString NodeId = NodeIdMap[Node];
+        NodeJson->SetStringField(TEXT("node_id"), NodeId);
+        NodesArray.Add(MakeShareable(new FJsonValueObject(NodeJson)));
+        
+        // Get connections from this node
+        TArray<TSharedPtr<FJsonValue>> NodeConnections = GetNodeConnections(Node, NodeIdMap);
+        for (const auto& Conn : NodeConnections)
+        {
+            ConnectionsArray.Add(Conn);
+        }
+    }
+    
+    Result->SetArrayField(TEXT("nodes"), NodesArray);
+    Result->SetNumberField(TEXT("node_count"), NodesArray.Num());
+    Result->SetArrayField(TEXT("connections"), ConnectionsArray);
+    Result->SetNumberField(TEXT("connection_count"), ConnectionsArray.Num());
+    
+    // Get rapid iteration parameters
+    TArray<TSharedPtr<FJsonValue>> ParametersArray;
+    const FNiagaraParameterStore& ParamStore = Script->RapidIterationParameters;
+    TArrayView<const FNiagaraVariableWithOffset> ParamVariables = ParamStore.ReadParameterVariables();
+    
+    for (const FNiagaraVariableWithOffset& ParamWithOffset : ParamVariables)
+    {
+        TSharedPtr<FJsonObject> ParamJson = MakeShareable(new FJsonObject);
+        ParamJson->SetStringField(TEXT("name"), ParamWithOffset.GetName().ToString());
+        ParamJson->SetStringField(TEXT("type"), ParamWithOffset.GetType().GetName());
+        ParametersArray.Add(MakeShareable(new FJsonValueObject(ParamJson)));
+    }
+    
+    Result->SetArrayField(TEXT("parameters"), ParametersArray);
+    Result->SetNumberField(TEXT("parameter_count"), ParametersArray.Num());
+    
+    return Result;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraScriptAsset(const TSharedPtr<FJsonObject>& Params)
+{
+    TSharedPtr<FJsonObject> Result = MakeShareable(new FJsonObject);
+
+    // This tool operates on standalone Niagara Script assets only
+    // (Module Scripts, Function Scripts, etc.)
+    // For modifying scripts within a Niagara System, use update_niagara_asset
+
+    FString ScriptPath;
+    if (!Params->TryGetStringField(TEXT("script_path"), ScriptPath))
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), TEXT("Missing required parameter: script_path"));
+        return Result;
+    }
+
+    const TArray<TSharedPtr<FJsonValue>>* OperationsArray;
+    if (!Params->TryGetArrayField(TEXT("operations"), OperationsArray))
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), TEXT("Missing required parameter: operations"));
+        return Result;
+    }
+
+    // Load the standalone script asset
+    UNiagaraScript* Script = LoadObject<UNiagaraScript>(nullptr, *ScriptPath);
+    if (!Script)
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to load Niagara script: %s"), *ScriptPath));
+        return Result;
+    }
+
+    Result->SetStringField(TEXT("script_path"), ScriptPath);
+
+    // Get graph source
+    UNiagaraScriptSource* Source = Cast<UNiagaraScriptSource>(Script->GetLatestSource());
+    if (!Source)
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), TEXT("Failed to get script source"));
+        return Result;
+    }
+    
+    UNiagaraGraph* Graph = Source->NodeGraph;
+    if (!Graph)
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), TEXT("Failed to get Niagara graph"));
+        return Result;
+    }
+    
+    TArray<TSharedPtr<FJsonValue>> ResultsArray;
+    int32 SuccessCount = 0;
+    int32 FailCount = 0;
+    
+    for (const TSharedPtr<FJsonValue>& OpValue : *OperationsArray)
+    {
+        TSharedPtr<FJsonObject> Op = OpValue->AsObject();
+        if (!Op.IsValid()) continue;
+        
+        FString Action = Op->GetStringField(TEXT("action"));
+        TSharedPtr<FJsonObject> OpResult = MakeShareable(new FJsonObject);
+        
+        if (Action == TEXT("add_module"))
+        {
+            // Add module to script
+            FString ModulePath;
+            if (!Op->TryGetStringField(TEXT("module_path"), ModulePath))
+            {
+                OpResult->SetBoolField(TEXT("success"), false);
+                OpResult->SetStringField(TEXT("error"), TEXT("Missing module_path"));
+                FailCount++;
+            }
+            else
+            {
+                // Load module script
+                UNiagaraScript* ModuleScript = LoadObject<UNiagaraScript>(nullptr, *ModulePath);
+                if (!ModuleScript)
+                {
+                    OpResult->SetBoolField(TEXT("success"), false);
+                    OpResult->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to load module: %s"), *ModulePath));
+                    FailCount++;
+                }
+                else
+                {
+                    // Find output node by iterating through graph nodes
+                    // Note: FindOutputNode and FindOutputNodes are not exported
+                    ENiagaraScriptUsage ScriptUsage = Script->GetUsage();
+                    UNiagaraNodeOutput* OutputNode = nullptr;
+
+                    for (UEdGraphNode* NodeBase : Graph->Nodes)
+                    {
+                        UNiagaraNodeOutput* Node = Cast<UNiagaraNodeOutput>(NodeBase);
+                        if (Node && Node->GetUsage() == ScriptUsage)
+                        {
+                            OutputNode = Node;
+                            break;
+                        }
+                    }
+
+                    if (!OutputNode)
+                    {
+                        OpResult->SetBoolField(TEXT("success"), false);
+                        OpResult->SetStringField(TEXT("error"), TEXT("Failed to find output node"));
+                        FailCount++;
+                    }
+                    else
+                    {
+                        // Use UNiagaraScript* version of AddScriptModuleToStack (exported with NIAGARAEDITOR_API)
+                        // Signature: NIAGARAEDITOR_API UNiagaraNodeFunctionCall* AddScriptModuleToStack(
+                        //     UNiagaraScript* ModuleScript, UNiagaraNodeOutput& TargetOutputNode,
+                        //     int32 TargetIndex = INDEX_NONE, FString SuggestedName = FString(),
+                        //     const FGuid& VersionGuid = FGuid())
+                        UNiagaraNodeFunctionCall* NewModule = FNiagaraStackGraphUtilities::AddScriptModuleToStack(
+                            ModuleScript,
+                            *OutputNode,
+                            INDEX_NONE,      // TargetIndex - add to end
+                            FString(),       // SuggestedName - empty for default
+                            FGuid()          // VersionGuid - empty for default
+                        );
+
+                        if (NewModule)
+                        {
+                            OpResult->SetBoolField(TEXT("success"), true);
+                            OpResult->SetStringField(TEXT("action"), TEXT("add_module"));
+                            OpResult->SetStringField(TEXT("module_path"), ModulePath);
+                            OpResult->SetStringField(TEXT("module_name"), NewModule->GetName());
+                            SuccessCount++;
+
+                            // Mark as modified
+                            Script->Modify();
+                        }
+                        else
+                        {
+                            OpResult->SetBoolField(TEXT("success"), false);
+                            OpResult->SetStringField(TEXT("error"), TEXT("Failed to add module to stack"));
+                            FailCount++;
+                        }
+                    }
+                }
+            }
+        }
+        else if (Action == TEXT("remove_module"))
+        {
+            // Remove module from script by directly removing the node from the graph
+            // Note: RemoveModuleFromStack is not exported, so we use simple node removal
+            FString ModuleName;
+            if (Op->TryGetStringField(TEXT("module_name"), ModuleName))
+            {
+                bool bFound = false;
+                for (UEdGraphNode* NodeBase : Graph->Nodes)
+                {
+                    UNiagaraNodeFunctionCall* FuncNode = Cast<UNiagaraNodeFunctionCall>(NodeBase);
+                    if (FuncNode && FuncNode->GetName().Contains(ModuleName))
+                    {
+                        // Mark script as modified before removing
+                        Script->Modify();
+                        FuncNode->Modify();
+
+                        // Break all connections first
+                        for (UEdGraphPin* Pin : FuncNode->Pins)
+                        {
+                            if (Pin)
+                            {
+                                Pin->BreakAllPinLinks();
+                            }
+                        }
+
+                        // Remove node from graph
+                        Graph->RemoveNode(FuncNode);
+
+                        OpResult->SetBoolField(TEXT("success"), true);
+                        OpResult->SetStringField(TEXT("action"), TEXT("remove_module"));
+                        OpResult->SetStringField(TEXT("module_name"), ModuleName);
+                        SuccessCount++;
+                        bFound = true;
+                        break;
+                    }
+                }
+
+                if (!bFound)
+                {
+                    OpResult->SetBoolField(TEXT("success"), false);
+                    OpResult->SetStringField(TEXT("error"), FString::Printf(TEXT("Module not found: %s"), *ModuleName));
+                    FailCount++;
+                }
+            }
+            else
+            {
+                OpResult->SetBoolField(TEXT("success"), false);
+                OpResult->SetStringField(TEXT("error"), TEXT("Missing module_name"));
+                FailCount++;
+            }
+        }
+        else if (Action == TEXT("set_parameter"))
+        {
+            // Set parameter value in rapid iteration parameters
+            FString ParamName;
+            if (!Op->TryGetStringField(TEXT("name"), ParamName))
+            {
+                OpResult->SetBoolField(TEXT("success"), false);
+                OpResult->SetStringField(TEXT("error"), TEXT("Missing parameter name"));
+                FailCount++;
+            }
+            else
+            {
+                // Get parameter value
+                TSharedPtr<FJsonValue> ValueJson = Op->TryGetField(TEXT("value"));
+                if (ValueJson.IsValid())
+                {
+                    // Try to set as float first
+                    float FloatValue;
+                    if (ValueJson->TryGetNumber(FloatValue))
+                    {
+                        FNiagaraVariable Var(FNiagaraTypeDefinition::GetFloatDef(), *ParamName);
+                        Var.SetValue(FloatValue);
+                        bool bAddIfMissing = true;
+                        Script->RapidIterationParameters.SetParameterData(Var.GetData(), Var, bAddIfMissing);
+                        
+                        OpResult->SetBoolField(TEXT("success"), true);
+                        OpResult->SetStringField(TEXT("action"), TEXT("set_parameter"));
+                        OpResult->SetStringField(TEXT("name"), ParamName);
+                        SuccessCount++;
+                        Script->Modify();
+                    }
+                    else
+                    {
+                        OpResult->SetBoolField(TEXT("success"), false);
+                        OpResult->SetStringField(TEXT("error"), TEXT("Unsupported parameter value type"));
+                        FailCount++;
+                    }
+                }
+                else
+                {
+                    OpResult->SetBoolField(TEXT("success"), false);
+                    OpResult->SetStringField(TEXT("error"), TEXT("Missing parameter value"));
+                    FailCount++;
+                }
+            }
+        }
+        else
+        {
+            OpResult->SetBoolField(TEXT("success"), false);
+            OpResult->SetStringField(TEXT("error"), FString::Printf(TEXT("Unknown action: %s"), *Action));
+            FailCount++;
+        }
+        
+        ResultsArray.Add(MakeShareable(new FJsonValueObject(OpResult)));
+    }
+
+    // Mark script package dirty
+    Script->MarkPackageDirty();
+
+    Result->SetBoolField(TEXT("success"), FailCount == 0);
+    Result->SetArrayField(TEXT("results"), ResultsArray);
+    Result->SetNumberField(TEXT("success_count"), SuccessCount);
+    Result->SetNumberField(TEXT("fail_count"), FailCount);
+    
+    return Result;
 }

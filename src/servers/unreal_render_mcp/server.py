@@ -23,9 +23,68 @@ import json
 import struct
 import time
 import threading
+import os
+from datetime import datetime
+from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, Any, Optional, List
 from mcp.server.fastmcp import FastMCP
+
+
+# ============================================================================
+# JSON Persistence Helper
+# ============================================================================
+
+def save_json_to_file(
+    data: Dict[str, Any],
+    save_to: str,
+    tool_name: str,
+    asset_name: str = None
+) -> Dict[str, Any]:
+    """
+    Save JSON data to a local file.
+    
+    Args:
+        data: The JSON data to save
+        save_to: Either a directory path or a full file path
+        tool_name: Name of the calling tool (for auto-naming)
+        asset_name: Optional asset name (for auto-naming)
+    
+    Returns:
+        Dict with save status info, or empty dict if save_to is None
+    """
+    if not save_to:
+        return {}
+    
+    try:
+        save_path = Path(save_to)
+        
+        # If it's a directory, auto-generate filename
+        if save_to.endswith('/') or save_to.endswith('\\') or save_path.is_dir():
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_asset_name = (asset_name or "data").replace('/', '_').replace('\\', '_')
+            filename = f"{tool_name}_{safe_asset_name}_{timestamp}.json"
+            save_path = save_path / filename
+        
+        # Create parent directories
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Write JSON
+        with open(save_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        
+        logger.info(f"Saved JSON to: {save_path}")
+        return {
+            "saved_to": str(save_path.absolute()),
+            "save_success": True
+        }
+    
+    except Exception as e:
+        logger.error(f"Failed to save JSON: {e}")
+        return {
+            "save_success": False,
+            "save_error": str(e)
+        }
 
 # Configure logging
 logging.basicConfig(
@@ -398,7 +457,7 @@ def compile_material(material_name: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def get_material_graph(material_name: str) -> Dict[str, Any]:
+def get_material_graph(material_name: str, save_to: Optional[str] = None) -> Dict[str, Any]:
     """
     Get complete material graph including nodes and connections.
     
@@ -406,6 +465,7 @@ def get_material_graph(material_name: str) -> Dict[str, Any]:
     
     Args:
         material_name: Name or path of the material
+        save_to: Optional path to save JSON. Can be a directory or full file path.
     
     Returns:
         Dictionary with:
@@ -425,19 +485,26 @@ def get_material_graph(material_name: str) -> Dict[str, Any]:
     unreal = get_unreal_connection()
     try:
         response = unreal.send_command("get_material_graph", {"material_name": material_name})
-        return response or {"success": False, "message": "No response from Unreal"}
+        result = response or {"success": False, "message": "No response from Unreal"}
+        
+        if save_to and result.get("success"):
+            save_info = save_json_to_file(result, save_to, "material_graph", material_name)
+            result.update(save_info)
+        
+        return result
     except Exception as e:
         logger.error(f"get_material_graph error: {e}")
         return {"success": False, "message": str(e)}
 
 
 @mcp.tool()
-def get_material_function_content(function_path: str) -> Dict[str, Any]:
+def get_material_function_content(function_path: str, save_to: Optional[str] = None) -> Dict[str, Any]:
     """
     Get detailed content of a Material Function including inputs, outputs, and expressions.
     
     Args:
         function_path: Full path to the Material Function (e.g., "/Engine/Functions/Engine_MaterialFunctions01/Texturing/BitMask.BitMask")
+        save_to: Optional path to save JSON. Can be a directory or full file path.
     
     Returns:
         Dictionary with function details including inputs, outputs, expressions
@@ -445,7 +512,14 @@ def get_material_function_content(function_path: str) -> Dict[str, Any]:
     unreal = get_unreal_connection()
     try:
         response = unreal.send_command("get_material_function_content", {"function_path": function_path})
-        return response or {"success": False, "message": "No response from Unreal"}
+        result = response or {"success": False, "message": "No response from Unreal"}
+        
+        if save_to and result.get("success"):
+            func_name = function_path.split("/")[-1].split(".")[0]
+            save_info = save_json_to_file(result, save_to, "material_function", func_name)
+            result.update(save_info)
+        
+        return result
     except Exception as e:
         logger.error(f"get_material_function_content error: {e}")
         return {"success": False, "message": str(e)}
@@ -1275,7 +1349,8 @@ def get_niagara_asset_details(
     asset_path: str,
     detail_level: str = "overview",
     emitters: List[str] = None,
-    include: List[str] = None
+    include: List[str] = None,
+    save_to: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Get detailed information about a Niagara system asset.
@@ -1289,6 +1364,7 @@ def get_niagara_asset_details(
         include: Optional list of sections to include when detail_level="full"
                 Options: ["scripts", "renderers", "simulation_stages", "parameters", "all"]
                 Default is ["all"]
+        save_to: Optional path to save JSON. Can be a directory or full file path.
     
     Returns:
         Dictionary containing asset information structured by detail level:
@@ -1333,19 +1409,11 @@ def get_niagara_asset_details(
         # Get quick overview of a Niagara asset
         get_niagara_asset_details("/Game/Effects/NS_Explosion")
         
-        # Get full details for a specific emitter
+        # Get full details and save to file
         get_niagara_asset_details(
             "/Game/Effects/NS_Fire",
             detail_level="full",
-            emitters=["Flame"],
-            include=["scripts", "parameters"]
-        )
-        
-        # Get only renderer information for all emitters
-        get_niagara_asset_details(
-            "/Game/Effects/NS_Complex",
-            detail_level="full",
-            include=["renderers"]
+            save_to="./output/"
         )
     """
     unreal = get_unreal_connection()
@@ -1363,7 +1431,14 @@ def get_niagara_asset_details(
     
     try:
         response = unreal.send_command("get_niagara_asset_details", params)
-        return response or {"success": False, "message": "No response from Unreal"}
+        result = response or {"success": False, "message": "No response from Unreal"}
+        
+        if save_to and result.get("success"):
+            asset_name = result.get("asset_name", asset_path.split("/")[-1])
+            save_info = save_json_to_file(result, save_to, "niagara_asset", asset_name)
+            result.update(save_info)
+        
+        return result
     except Exception as e:
         logger.error(f"get_niagara_asset_details error: {e}")
         return {"success": False, "message": str(e)}
@@ -1388,13 +1463,15 @@ def update_niagara_asset(
             - Other fields depending on target and action
     
     Operation Formats:
-    
+
         # Emitter operations
         {"target": "emitter", "name": "Flame", "action": "set_enabled", "value": false}
         {"target": "emitter", "name": "Flame", "action": "rename", "value": "BigFlame"}
         {"target": "emitter", "name": "Flame", "action": "set_mode", "value": "Standard"}  # or "Stateless" (UE 5.7+)
         {"target": "emitter", "name": "Smoke", "action": "add", "template": "/Niagara/Templates/SimpleSmoke"}
         {"target": "emitter", "name": "OldEmitter", "action": "remove"}
+        {"target": "emitter", "name": "Flame", "action": "add_module", "module_path": "/Niagara/Modules/Update/Forces/CurlNoiseForce.CurlNoiseForce"}
+        {"target": "emitter", "name": "Flame", "action": "add_module", "script": "spawn", "module_path": "/Niagara/Modules/Spawn/..."}
         
         # Renderer operations
         {"target": "renderer", "emitter": "Flame", "index": 0, "action": "set_enabled", "value": true}
@@ -1610,7 +1687,8 @@ def get_niagara_module_graph(
     asset_path: str,
     emitter: str,
     script: str = "spawn",
-    module: str = ""
+    module: str = "",
+    save_to: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Get Niagara Module Graph nodes and connections, similar to get_material_graph for materials.
@@ -1625,6 +1703,7 @@ def get_niagara_module_graph(
         emitter: Name of the emitter to inspect
         script: Script type - "spawn" or "update" (default: "spawn")
         module: Optional filter - only return nodes matching this module name
+        save_to: Optional path to save JSON. Can be a directory or full file path.
     
     Returns:
         Dictionary with graph structure:
@@ -1633,67 +1712,11 @@ def get_niagara_module_graph(
             "asset_path": "/Game/Effects/NS_Fire",
             "emitter_name": "Flame",
             "script_type": "spawn",
-            "nodes": [
-                {
-                    "node_id": "Node_0",
-                    "type": "Input",
-                    "name": "SpawnRate",
-                    "usage": "input",
-                    "input_name": "SpawnRate",
-                    "input_type": "float",
-                    "default_value": 100.0,
-                    "pos_x": -500,
-                    "pos_y": 0,
-                    "output_pins": [{"name": "Value", "type": "float", "connections": 1}]
-                },
-                {
-                    "node_id": "Node_1",
-                    "type": "FunctionCall",
-                    "name": "Lifetime",
-                    "usage": "function_call",
-                    "function_name": "Lifetime",
-                    "pos_x": 0,
-                    "pos_y": 0,
-                    "input_pins": [...],
-                    "output_pins": [...]
-                },
-                ...
-            ],
+            "nodes": [...],
+            "connections": [...],
             "node_count": 15,
-            "connections": [
-                {
-                    "source_node": "Node_0",
-                    "source_pin": "Value",
-                    "target_node": "Node_1",
-                    "target_pin": "SpawnRate"
-                },
-                ...
-            ],
             "connection_count": 12
         }
-    
-    Node Types:
-        - Input: Parameter input nodes (SpawnRate, Lifetime, Color, etc.)
-        - Output: Script output node
-        - FunctionCall: Function/module call nodes
-        - Operator: Math operator nodes (+, -, *, /, etc.)
-        - Convert: Type conversion nodes
-        - Constant: Constant value nodes
-        - Module: Module wrapper nodes
-    
-    Examples:
-        # Get entire spawn script graph
-        graph = get_niagara_module_graph("/Game/Effects/NS_Fire", "Flame", "spawn")
-        
-        # Get update script graph
-        graph = get_niagara_module_graph("/Game/Effects/NS_Fire", "Flame", "update")
-        
-        # Filter by module name
-        graph = get_niagara_module_graph("/Game/Effects/NS_Fire", "Flame", "spawn", module="Lifetime")
-        
-        # Analyze node connections
-        for conn in graph["connections"]:
-            print(f"{conn['source_node']}:{conn['source_pin']} -> {conn['target_node']}:{conn['target_pin']}")
     """
     unreal = get_unreal_connection()
     
@@ -1706,9 +1729,164 @@ def get_niagara_module_graph(
     
     try:
         response = unreal.send_command("get_niagara_module_graph", params)
-        return response or {"success": False, "message": "No response from Unreal"}
+        result = response or {"success": False, "message": "No response from Unreal"}
+        
+        if save_to and result.get("success"):
+            graph_name = f"{emitter}_{script}"
+            save_info = save_json_to_file(result, save_to, "niagara_graph", graph_name)
+            result.update(save_info)
+        
+        return result
     except Exception as e:
         logger.error(f"get_niagara_module_graph error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@mcp.tool()
+def get_niagara_script_asset(
+    script_path: str,
+    save_to: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Get Niagara Script Asset details for standalone script assets.
+    
+    This tool reads standalone Niagara Script assets like:
+    - Module scripts (e.g., "/Niagara/Modules/Update/Forces/CurlNoiseForce.CurlNoiseForce")
+    - Function scripts
+    - Dynamic Input scripts
+    
+    NOTE: This is for standalone script ASSETS, not scripts within a Niagara System.
+    For scripts within a System, use get_niagara_asset_details instead.
+    
+    Args:
+        script_path: Full path to the standalone Niagara Script asset
+                    (e.g., "/Niagara/Modules/Update/Forces/CurlNoiseForce.CurlNoiseForce")
+        save_to: Optional path to save JSON. Can be a directory (auto-generates filename)
+                 or a full file path. Set to "./output/" to save with auto-generated name.
+    
+    Returns:
+        Dictionary with script metadata and graph structure:
+        {
+            "success": true,
+            "script_path": "/Niagara/Modules/Update/Forces/CurlNoiseForce.CurlNoiseForce",
+            "script_name": "CurlNoiseForce",
+            "usage": "Module",
+            "description": "...",
+            "has_graph": true,
+            "nodes": [...],
+            "connections": [...],
+            "parameters": [
+                {"name": "NoiseStrength", "type": "float"},
+                {"name": "NoiseFrequency", "type": "float"}
+            ],
+            "saved_to": "path/to/file.json"  // if save_to was specified
+        }
+    
+    Examples:
+        # Read a force module
+        script = get_niagara_script_asset("/Niagara/Modules/Update/Forces/CurlNoiseForce.CurlNoiseForce")
+        
+        # Read and save to auto-generated filename in ./output/
+        script = get_niagara_script_asset(
+            "/Niagara/Modules/Update/Forces/CurlNoiseForce.CurlNoiseForce",
+            save_to="./output/"
+        )
+        
+        # Read and save to specific path
+        script = get_niagara_script_asset(
+            "/Niagara/Modules/Update/Forces/CurlNoiseForce.CurlNoiseForce",
+            save_to="C:/temp/curl_noise.json"
+        )
+    """
+    unreal = get_unreal_connection()
+    
+    params = {
+        "script_path": script_path
+    }
+    
+    try:
+        response = unreal.send_command("get_niagara_script_asset", params)
+        result = response or {"success": False, "message": "No response from Unreal"}
+        
+        # Save to file if requested
+        if save_to and result.get("success"):
+            asset_name = result.get("script_name", script_path.split("/")[-1])
+            save_info = save_json_to_file(result, save_to, "niagara_script", asset_name)
+            result.update(save_info)
+        
+        return result
+    except Exception as e:
+        logger.error(f"get_niagara_script_asset error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@mcp.tool()
+def update_niagara_script_asset(
+    script_path: str,
+    operations: List[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Update a standalone Niagara Script Asset with operations like add/remove modules.
+    
+    This tool modifies standalone Niagara Script assets (Module Scripts, Function Scripts).
+    
+    NOTE: This is for standalone script ASSETS, not scripts within a Niagara System.
+    For modifying scripts within a System, use update_niagara_asset instead.
+    
+    Args:
+        script_path: Full path to a standalone Niagara Script asset
+        operations: List of operations to perform
+    
+    Operation Types:
+        # Add a module to the script
+        {"action": "add_module", "module_path": "/Niagara/Modules/Update/Forces/CurlNoiseForce.CurlNoiseForce"}
+        
+        # Remove a module by name
+        {"action": "remove_module", "module_name": "CurlNoiseForce"}
+        
+        # Set a parameter value
+        {"action": "set_parameter", "name": "NoiseStrength", "value": 100.0}
+    
+    Returns:
+        Dictionary with results:
+        {
+            "success": true,
+            "results": [...],
+            "success_count": 2,
+            "fail_count": 0
+        }
+    
+    Examples:
+        # Add a module to a script asset
+        result = update_niagara_script_asset(
+            script_path="/Game/MyModules/MyCustomModule.MyCustomModule",
+            operations=[{"action": "add_module", "module_path": "/Niagara/Modules/Update/Forces/CurlNoiseForce.CurlNoiseForce"}]
+        )
+        
+        # Add module and set parameter
+        result = update_niagara_script_asset(
+            script_path="/Game/MyModules/MyCustomModule.MyCustomModule",
+            operations=[
+                {"action": "add_module", "module_path": "/Niagara/Modules/Update/Forces/CurlNoiseForce.CurlNoiseForce"},
+                {"action": "set_parameter", "name": "NoiseStrength", "value": 200.0}
+            ]
+        )
+    """
+    unreal = get_unreal_connection()
+    
+    if operations is None:
+        operations = []
+    
+    params = {
+        "script_path": script_path,
+        "operations": operations
+    }
+    
+    try:
+        response = unreal.send_command("update_niagara_script_asset", params)
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"update_niagara_script_asset error: {e}")
         return {"success": False, "message": str(e)}
 
 
