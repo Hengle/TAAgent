@@ -273,34 +273,33 @@ half InScatter = pow(saturate(dot(L, -V)), 12) * lerp(3, 0.1, Opacity);
 | 间接光照 | BaseColor | BaseColor | **BaseColor + SubsurfaceColor** |
 | Opacity 影响 | - | 无 | ✅ 散射强度 |
 
-### 5.2 半透明 PerVertex / Volumetric Directional 模式
+### 5.2 半透明 Volumetric Directional 模式
 
-**关键发现：只有 TwoSidedFoliage 会计算背面间接光照！**
+**⚠️ 关键发现：TwoSidedFoliage 缺少 Translucent Lighting Volume 光照！**
 
 ```hlsl
-// ShadingCommon.ush:91-94
-bool GetShadingModelRequiresBackfaceLighting(uint ShadingModelID)
-{
-    return ShadingModelID == SHADINGMODELID_TWOSIDED_FOLIAGE;  // 只有 TwoSidedFoliage！
-}
-```
-
-**间接光照计算（BasePassPixelShader.usf:1345）：**
-```hlsl
-DiffuseColor += (DiffuseIndirectLighting * DiffuseColorForIndirect 
-              + SubsurfaceIndirectLighting * SubsurfaceColor)  // 背面贡献
-              * AOMultiBounce(...);
+// BasePassPixelShader.usf:1547-1556
+// Volume lighting for lit translucency
+#if (MATERIAL_SHADINGMODEL_DEFAULT_LIT || MATERIAL_SHADINGMODEL_SUBSURFACE) && ...
+    if (GBuffer.ShadingModelID == SHADINGMODELID_DEFAULT_LIT || 
+        GBuffer.ShadingModelID == SHADINGMODELID_SUBSURFACE)
+    {
+        GetTranslucencyVolumeLighting(...);  // ← 只对 DefaultLit 和 Subsurface 调用！
+    }
+#endif
 ```
 
 | 特性 | DefaultLit | TwoSidedFoliage | Subsurface |
 |------|-----------|-----------------|------------|
-| Diffuse | BaseColor | BaseColor | BaseColor |
+| Translucent Lighting Volume | ✅ | ❌ **缺失** | ✅ |
 | Transmission | ❌ | ❌ | ❌ |
 | Specular | ❌ | ❌ | ❌ |
-| 背面间接光照 | ❌ | **✅ SubsurfaceIndirectLighting** | ❌ |
-| **表现差异** | **相同** | **更亮** | **相同** |
+| Lumen GI / SkyLight | ✅ 正面 | ✅ 正面+背面 | ✅ 正面 |
+| **表现差异** | **正常** | **明显更暗** | **正常** |
 
-**结论：TwoSidedFoliage 在Volumetric 模式下会比其他 ShadingModel 更亮，因为它额外计算了背面间接光照。**
+**结论：TwoSidedFoliage 在 Volumetric Directional 模式下会明显比 DefaultLit/Subsurface 更暗，因为它缺少 Translucent Lighting Volume 的直接光和间接光贡献。**
+
+**注意：** 虽然 TwoSidedFoliage 有背面间接光照（`SubsurfaceIndirectLighting * SubsurfaceColor`），但这无法弥补缺少 Volume 直接光的能量损失。
 
 ### 5.3 半透明 Surface 模式
 
@@ -380,16 +379,76 @@ bool GetShadingModelRequiresBackfaceLighting(uint ShadingModelID)
 
 这导致 TwoSidedFoliage 会额外获得 `SubsurfaceIndirectLighting * SubsurfaceColor` 的贡献，比 DefaultLit 和 Subsurface 更亮。
 
-### Q2: TwoSidedFoliage 的 Opacity 为什么不影响表现？
+### Q2: Volumetric Directional 模式下 TwoSidedFoliage 为什么看起来很暗？
+
+**A:** 这是一个 **UE 源码中的设计缺陷/Bug**。TwoSidedFoliage 在 Volumetric Directional 模式下 **完全缺少 Translucent Lighting Volume 的光照贡献**。
+
+**源码证据（BasePassPixelShader.usf:1547-1556）：**
+```hlsl
+// Volume lighting for lit translucency
+#if (MATERIAL_SHADINGMODEL_DEFAULT_LIT || MATERIAL_SHADINGMODEL_SUBSURFACE) && ...
+    if (GBuffer.ShadingModelID == SHADINGMODELID_DEFAULT_LIT || 
+        GBuffer.ShadingModelID == SHADINGMODELID_SUBSURFACE)
+    {
+        GetTranslucencyVolumeLighting(...);  // ← 只对 DefaultLit 和 Subsurface 调用！
+        Color += TLVDiffuseLighting;
+        Color += TLVSpecularLighting;
+    }
+#endif
+// ⚠️ TwoSidedFoliage 完全被排除在这个条件之外！
+```
+
+**光照来源对比表：**
+
+| 光照来源 | DefaultLit | Subsurface | TwoSidedFoliage |
+|---------|-----------|------------|-----------------|
+| Translucent Lighting Volume (直接光) | ✅ | ✅ | ❌ **缺失** |
+| Translucent Lighting Volume (间接光) | ✅ | ✅ | ❌ **缺失** |
+| Lumen GI / SkyLight | ✅ | ✅ | ✅ (只有正面) |
+| 背面间接光照 | ❌ | ❌ | ✅ (额外贡献) |
+
+**TwoSidedFoliage 看起来"很暗/不受直接光影响"的真正原因：**
+
+1. **缺少 Translucent Lighting Volume** - 没有 Volume 中的直接光贡献
+2. **只有间接光** - 来自 SkyLight 和 Lumen GI 的环境光，能量较低
+3. **背面间接光照不足以弥补** - 正面没有直接光，即使背面有间接光照也显得很暗
+
+**这不是 Shader 编译优化的结果，而是源码中明确的设计遗漏！**
+
+**解决方案：**
+- **避免组合**: TwoSidedFoliage + Volumetric Directional 是不兼容的组合
+- **使用 Surface 模式**: 改用 `Surface LightingVolume` 模式，可获得完整的 Transmission 光照
+- **切换 ShadingModel**: 如果需要 Volumetric Directional，使用 DefaultLit 或 Subsurface 代替
+
+### Q3: TwoSidedFoliage 的 Opacity 为什么不影响表现？
 
 **A:** 源码中 Opacity 被存储到 `GBuffer.CustomData.a`，但在 `TwoSidedBxDF` 中从未被读取。这是一个设计遗留问题。
 
-### Q3: 如何在Volumetric 模式下获得一致的背光效果？
+### Q4: 如何在Volumetric 模式下获得一致的背光效果？
 
 **A:** Volumetric 模式不计算 Transmission。解决方案：
 - **方案1**: 使用 Surface LightingVolume 模式（有 Transmission）
 - **方案2**: 使用材质 Emissive 手动模拟背光
 - **方案3**: 使用 TwoSidedFoliage + Volumetric Directional（有背面间接光照，但不是真正的Transmission）
+
+### Q6: 如何让 Volumetric Directional 模式下的 ShadingModel 表现一致？
+
+**A:** 由于 TwoSidedFoliage 在 Volumetric Directional 模式下缺少 Translucent Lighting Volume 光照，无法通过参数调整使其与 DefaultLit/Subsurface 表现一致。
+
+**推荐方案：**
+```
+// 方案1: 使用 DefaultLit 或 Subsurface（获得完整 Volume 光照）
+ShadingModel: DefaultLit 或 Subsurface
+LightingMode: Volumetric Directional
+
+// 方案2: 使用 Surface LightingVolume（TwoSidedFoliage 获得 Transmission）
+ShadingModel: TwoSidedFoliage
+LightingMode: Surface LightingVolume  // 切换到 Surface 模式！
+
+// 方案3: 性能优先时使用 PerVertex 模式
+ShadingModel: DefaultLit / Subsurface / TwoSidedFoliage（表现相同）
+LightingMode: Volumetric PerVertex Directional
+```
 
 ### Q4: Subsurface 的间接光照为什么更亮？
 
@@ -409,3 +468,34 @@ bool GetShadingModelRequiresBackfaceLighting(uint ShadingModelID)
 | VolumeLighting 函数 | `TranslucencyVolumeCommon.ush:76-100` |
 | 间接光照处理 | `DiffuseIndirectComposite.usf:580-584` |
 | Forward 光照 | `ForwardLightingCommon.ush:137-270` |
+| **Translucent Volume Lighting 调用** | `BasePassPixelShader.usf:1547-1556` |
+
+---
+
+## 9. 已知问题
+
+### TwoSidedFoliage + Volumetric Directional 组合问题
+
+**问题描述：** TwoSidedFoliage 在 Volumetric Directional 模式下缺少 Translucent Lighting Volume 的直接光贡献，导致材质明显变暗。
+
+**影响版本：** UE 5.7（可能影响更早版本）
+
+**源码位置：** `Engine/Shaders/Private/BasePassPixelShader.usf:1547-1556`
+
+**修复建议（需修改引擎源码）：**
+```hlsl
+// 将条件从：
+#if (MATERIAL_SHADINGMODEL_DEFAULT_LIT || MATERIAL_SHADINGMODEL_SUBSURFACE) && ...
+    if (GBuffer.ShadingModelID == SHADINGMODELID_DEFAULT_LIT || 
+        GBuffer.ShadingModelID == SHADINGMODELID_SUBSURFACE)
+
+// 修改为：
+#if (MATERIAL_SHADINGMODEL_DEFAULT_LIT || MATERIAL_SHADINGMODEL_SUBSURFACE || MATERIAL_SHADINGMODEL_TWOSIDED_FOLIAGE) && ...
+    if (GBuffer.ShadingModelID == SHADINGMODELID_DEFAULT_LIT || 
+        GBuffer.ShadingModelID == SHADINGMODELID_SUBSURFACE ||
+        GBuffer.ShadingModelID == SHADINGMODELID_TWOSIDED_FOLIAGE)
+```
+
+**临时解决方案：**
+- 使用 Surface LightingVolume 模式代替 Volumetric Directional
+- 使用 DefaultLit 或 Subsurface 代替 TwoSidedFoliage
